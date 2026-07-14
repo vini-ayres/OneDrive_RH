@@ -210,11 +210,11 @@ export function SettingsPage() {
                 type="url"
                 value={n8nUrl}
                 onChange={e => setN8nUrl(e.target.value)}
-                placeholder="https://seu-n8n.empresa.com/webhook"
+                placeholder="https://seu-n8n.empresa.com/webhook/one-drive-tst"
                 className="input-field text-sm font-mono"
               />
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                Configure no arquivo .env como VITE_N8N_BASE_URL
+                Configure no arquivo .env como VITE_N8N_CHAT_WEBHOOK_URL ou VITE_N8N_BASE_URL
               </p>
             </div>
             <button

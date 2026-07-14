@@ -6,13 +6,22 @@ import { getUserProfile, getUserGroups } from '../services/apiService'
 import { getRolesFromGroups } from '../utils/rbac'
 import { loginRequest, graphRequest } from '../auth/msalConfig'
 import { UserProfile } from '../types'
+import {
+  createLocalTestUserProfile,
+  isLocalTestModeEnabled,
+  isLocalTestUser,
+  LOCAL_TEST_ACCESS_TOKEN,
+} from '../utils/localTestUser'
 
 export function useAuth() {
   const { instance, accounts, inProgress } = useMsal()
   const isAuthenticated = useIsAuthenticated()
   const { state, dispatch } = useApp()
+  const localTestModeEnabled = isLocalTestModeEnabled()
+  const localTestSessionActive = isLocalTestUser(state.user)
 
   const isLoading = inProgress !== InteractionStatus.None
+  const isAuthenticatedEffective = isAuthenticated || localTestSessionActive
 
   /**
    * Inicia o fluxo de login com Microsoft
@@ -28,6 +37,17 @@ export function useAuth() {
   }, [instance, dispatch])
 
   /**
+   * Cria uma sessão local de teste sem depender do Microsoft Entra ID
+   */
+  const loginLocalTestUser = useCallback(() => {
+    if (!localTestModeEnabled) return
+
+    dispatch({ type: 'SET_LOADING', payload: true })
+    sessionStorage.removeItem('audit_buffer')
+    dispatch({ type: 'SET_USER', payload: createLocalTestUserProfile() })
+  }, [dispatch, localTestModeEnabled])
+
+  /**
    * Realiza logout
    */
   const logout = useCallback(async () => {
@@ -35,6 +55,10 @@ export function useAuth() {
       dispatch({ type: 'LOGOUT' })
       // Limpar sessão
       sessionStorage.clear()
+
+      if (localTestSessionActive || !accounts[0]) {
+        return
+      }
       
       await instance.logoutRedirect({
         account: accounts[0],
@@ -43,12 +67,16 @@ export function useAuth() {
     } catch (error) {
       console.error('Erro no logout:', error)
     }
-  }, [instance, accounts, dispatch])
+  }, [instance, accounts, dispatch, localTestSessionActive])
 
   /**
    * Obtém access token silenciosamente (com renovação automática)
    */
   const getAccessToken = useCallback(async (scopes?: string[]): Promise<string | null> => {
+    if (localTestSessionActive) {
+      return LOCAL_TEST_ACCESS_TOKEN
+    }
+
     if (!accounts[0]) return null
 
     try {
@@ -69,7 +97,7 @@ export function useAuth() {
         return null
       }
     }
-  }, [instance, accounts])
+  }, [instance, accounts, localTestSessionActive])
 
   /**
    * Carrega o perfil completo do usuário após autenticação
@@ -149,9 +177,10 @@ export function useAuth() {
 
   return {
     user: state.user,
-    isAuthenticated,
+    isAuthenticated: isAuthenticatedEffective,
     isLoading: isLoading || state.isLoading,
     login,
+    loginLocalTestUser,
     logout,
     getAccessToken,
     loadUserProfile,

@@ -2,11 +2,13 @@ import React from 'react'
 import { Shield, Lock, Users, FileSearch, Loader2, CheckCircle } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useApp } from '../contexts/AppContext'
+import { isLocalTestModeEnabled } from '../utils/localTestUser'
 
 export function LoginPage() {
-  const { login, isLoading } = useAuth()
+  const { login, loginLocalTestUser, isLoading } = useAuth()
   const { state } = useApp()
   const { theme } = state
+  const localTestModeEnabled = isLocalTestModeEnabled()
 
   const features = [
     { icon: <FileSearch size={18} />, label: 'Consulta inteligente de documentos' },
@@ -112,6 +114,28 @@ export function LoginPage() {
                 </>
               )}
             </button>
+
+            {localTestModeEnabled && (
+              <>
+                <div className="my-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-[var(--border-color)]" />
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                    Ambiente local
+                  </span>
+                  <div className="h-px flex-1 bg-[var(--border-color)]" />
+                </div>
+
+                <button
+                  onClick={loginLocalTestUser}
+                  disabled={isLoading}
+                  className="w-full flex items-center justify-center gap-3 py-3 px-4 border-2 border-dashed border-blue-300 dark:border-blue-700 rounded-xl text-blue-700 dark:text-blue-300 font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  aria-label="Entrar com usuário de teste local"
+                >
+                  <CheckCircle size={18} />
+                  <span>Entrar com usuário de teste local</span>
+                </button>
+              </>
+            )}
 
             {/* Security badges */}
             <div className="mt-6 space-y-2">

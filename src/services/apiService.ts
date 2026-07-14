@@ -1,17 +1,355 @@
 import { 
   ChatPayload, ChatApiResponse, ApiResponse, 
   AuditLog, AuditFilters, DashboardStats,
-  ChartDataPoint, DocumentSource, UserProfile
+  ChartDataPoint, DocumentSource, ProcessingStep, UserProfile
 } from '../types'
-import { generateCsrfToken } from '../utils/security'
+import { generateCsrfToken, generateSessionId } from '../utils/security'
+import {
+  LOCAL_TEST_ACCESS_TOKEN,
+  LOCAL_TEST_USER_EMAIL,
+  LOCAL_TEST_USER_ID,
+  LOCAL_TEST_USER_NAME,
+  createLocalTestUserProfile,
+} from '../utils/localTestUser'
 
-const N8N_BASE_URL = import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook'
+const N8N_BASE_URL = (import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook').trim()
+const N8N_CHAT_WEBHOOK_URL = (
+  import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL?.trim() ||
+  resolveChatWebhookUrl(N8N_BASE_URL)
+).replace(/\/+$/, '')
 
 // Timeout padrão de 60 segundos
 const DEFAULT_TIMEOUT = 60000
 
 // CSRF token para a sessão
 const csrfToken = generateCsrfToken()
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function resolveChatWebhookUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '')
+
+  // Se o usuário já configurou o webhook completo (ex.: /webhook/one-drive-tst),
+  // usamos exatamente esse endpoint.
+  if (normalized.includes('/webhook/') && !normalized.endsWith('/webhook')) {
+    return normalized
+  }
+
+  // Compatibilidade com a configuração antiga, onde o front montava /chat.
+  if (normalized.endsWith('/webhook')) {
+    return `${normalized}/chat`
+  }
+
+  return normalized
+}
+
+function normalizeApiResponse<T>(payload: unknown): ApiResponse<T> {
+  const timestamp = new Date().toISOString()
+
+  if (payload == null) {
+    return { success: true, data: undefined as T, timestamp }
+  }
+
+  if (typeof payload === 'string') {
+    return { success: true, data: payload as T, timestamp }
+  }
+
+  if (!isRecord(payload)) {
+    return { success: true, data: payload as T, timestamp }
+  }
+
+  const data = 'data' in payload && payload.data !== undefined
+    ? payload.data
+    : payload
+
+  return {
+    success: typeof payload.success === 'boolean' ? payload.success : true,
+    data: data as T,
+    error: typeof payload.error === 'string' ? payload.error : undefined,
+    message: typeof payload.message === 'string' ? payload.message : undefined,
+    requestId: typeof payload.requestId === 'string' ? payload.requestId : undefined,
+    timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : timestamp,
+  }
+}
+
+function coerceChatResponse(payload: unknown): ChatApiResponse | null {
+  if (payload == null) return null
+
+  if (typeof payload === 'string') {
+    return {
+      answer: payload,
+      sources: [],
+      processingSteps: [],
+      wasBlocked: false,
+      requestId: generateSessionId(),
+      processingTimeMs: 0,
+    }
+  }
+
+  if (!isRecord(payload)) {
+    if (Array.isArray(payload) && payload.length > 0) {
+      return coerceChatResponse(payload[0])
+    }
+    return null
+  }
+
+  if ('json' in payload && payload.json !== undefined) {
+    const nestedJson = coerceChatResponse(payload.json)
+    if (nestedJson) return nestedJson
+  }
+
+  if ('body' in payload && payload.body !== undefined) {
+    const nestedBody = coerceChatResponse(payload.body)
+    if (nestedBody) return nestedBody
+  }
+
+  if ('data' in payload && payload.data !== undefined) {
+    const nested = coerceChatResponse(payload.data)
+    if (nested) return nested
+  }
+
+  const answer =
+    typeof payload.answer === 'string'
+      ? payload.answer
+      : typeof payload.message === 'string'
+        ? payload.message
+        : typeof payload.response === 'string'
+          ? payload.response
+          : typeof payload.output === 'string'
+            ? payload.output
+            : typeof payload.result === 'string'
+              ? payload.result
+            : typeof payload.text === 'string'
+              ? payload.text
+              : typeof payload.content === 'string'
+                ? payload.content
+          : null
+
+  if (!answer) return null
+
+  const sources = Array.isArray(payload.sources) ? payload.sources as DocumentSource[] : []
+  const processingSteps = Array.isArray(payload.processingSteps) ? payload.processingSteps as ProcessingStep[] : []
+
+  return {
+    answer,
+    sources,
+    processingSteps,
+    blockedReason: typeof payload.blockedReason === 'string' ? payload.blockedReason : undefined,
+    wasBlocked: Boolean(payload.wasBlocked),
+    requestId: typeof payload.requestId === 'string' ? payload.requestId : generateSessionId(),
+    processingTimeMs: typeof payload.processingTimeMs === 'number' ? payload.processingTimeMs : 0,
+  }
+}
+
+function isLocalTestAccessToken(accessToken?: string): boolean {
+  return accessToken === LOCAL_TEST_ACCESS_TOKEN
+}
+
+function createApiResponse<T>(data: T, requestId = generateSessionId()): ApiResponse<T> {
+  return {
+    success: true,
+    data,
+    requestId,
+    timestamp: new Date().toISOString(),
+  }
+}
+
+function createMockSources(query: string): DocumentSource[] {
+  const normalized = query.toLowerCase()
+  const now = new Date()
+
+  const baseSources: DocumentSource[] = [
+    {
+      id: generateSessionId(),
+      name: 'Regulamento_Interno_2024.pdf',
+      path: '/RH/Políticas/Regulamento_Interno_2024.pdf',
+      modifiedAt: now,
+      webUrl: 'https://example.com/regulamento-interno',
+      type: 'pdf',
+      relevanceScore: 0.97,
+      excerpt: 'Documento-base com políticas internas, condutas e regras de acesso.',
+    },
+    {
+      id: generateSessionId(),
+      name: 'Manual_de_Onboarding.pdf',
+      path: '/RH/Admissão/Manual_de_Onboarding.pdf',
+      modifiedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+      webUrl: 'https://example.com/manual-onboarding',
+      type: 'pdf',
+      relevanceScore: 0.89,
+      excerpt: 'Resumo do processo de integração e documentos admissionais.',
+    },
+    {
+      id: generateSessionId(),
+      name: 'Política_de_Benefícios_v3.docx',
+      path: '/RH/Políticas/Política_de_Benefícios_v3.docx',
+      modifiedAt: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
+      webUrl: 'https://example.com/politica-beneficios',
+      type: 'docx',
+      relevanceScore: 0.84,
+      excerpt: 'Regras de benefícios, elegibilidade e procedimentos de solicitação.',
+    },
+  ]
+
+  if (normalized.includes('contrat')) {
+    return [
+      {
+        id: generateSessionId(),
+        name: 'Contrato_Trabalho_Template.docx',
+        path: '/RH/Contratos/Contrato_Trabalho_Template.docx',
+        modifiedAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+        webUrl: 'https://example.com/contrato-trabalho',
+        type: 'docx',
+        relevanceScore: 0.98,
+        excerpt: 'Modelo de contrato de trabalho e cláusulas padrão.',
+      },
+      baseSources[0],
+    ]
+  }
+
+  if (normalized.includes('holer') || normalized.includes('salario') || normalized.includes('salário')) {
+    return [
+      {
+        id: generateSessionId(),
+        name: 'Holerite_Template.xlsx',
+        path: '/RH/Holerites/Holerite_Template.xlsx',
+        modifiedAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
+        webUrl: 'https://example.com/holerite',
+        type: 'xlsx',
+        relevanceScore: 0.96,
+        excerpt: 'Estrutura de demonstrativo de pagamento para fins de teste.',
+      },
+      baseSources[2],
+    ]
+  }
+
+  return baseSources
+}
+
+function createProcessingSteps(): ProcessingStep[] {
+  const now = new Date()
+  return [
+    { id: 'auth', label: 'Verificando autenticação...', status: 'done', timestamp: now },
+    { id: 'search', label: 'Consultando OneDrive/SharePoint...', status: 'done', timestamp: now },
+    { id: 'analyze', label: 'Analisando documentos...', status: 'done', timestamp: now },
+    { id: 'generate', label: 'Gerando resposta...', status: 'done', timestamp: now },
+  ]
+}
+
+function createLocalChatResponse(query: string): ApiResponse<ChatApiResponse> {
+  const sources = createMockSources(query)
+  const lower = query.toLowerCase()
+
+  let answer = `**Resposta local de teste**\n\nRecebi a consulta: "${query}".\n\nEste ambiente está em modo local, então a resposta abaixo é simulada para validar a interface, o RBAC e a apresentação de fontes.`
+
+  if (lower.includes('contrat')) {
+    answer += `\n\nPara testes, a busca aponta para o modelo de contrato e o regulamento interno, que normalmente são os principais documentos de referência nesta categoria.`
+  } else if (lower.includes('holer') || lower.includes('salario') || lower.includes('salário')) {
+    answer += `\n\nPara testes, a consulta encontrou um holerite-modelo e a política de benefícios associada.`
+  } else if (lower.includes('documentos admissionais') || lower.includes('admiss')) {
+    answer += `\n\nPara testes, o ambiente retorna o manual de onboarding e documentos admissionais correlatos.`
+  } else {
+    answer += `\n\nVocê pode usar este perfil local para navegar pelo dashboard, documentos, auditoria e chat sem depender do backend n8n.`
+  }
+
+  return createApiResponse<ChatApiResponse>({
+    answer,
+    sources,
+    processingSteps: createProcessingSteps(),
+    wasBlocked: false,
+    requestId: generateSessionId(),
+    processingTimeMs: 640,
+  })
+}
+
+function createLocalDocumentResults(query: string): DocumentSource[] {
+  return createMockSources(query)
+}
+
+function createLocalHistory() {
+  return {
+    conversations: [
+      {
+        id: 'local-conv-1',
+        title: 'Consulta de contrato',
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 'local-conv-2',
+        title: 'Holerite e benefícios',
+        updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ],
+  }
+}
+
+function readLocalAuditBuffer(): AuditLog[] {
+  try {
+    const existing = sessionStorage.getItem('audit_buffer')
+    if (!existing) return []
+
+    const raw = JSON.parse(existing) as Array<Partial<AuditLog>>
+    return raw.map(item => ({
+      id: item.id || generateSessionId(),
+      userId: item.userId || LOCAL_TEST_USER_ID,
+      userName: item.userName || LOCAL_TEST_USER_NAME,
+      userEmail: item.userEmail || LOCAL_TEST_USER_EMAIL,
+      action: item.action || 'chat_query',
+      query: item.query || '',
+      documentAccessed: item.documentAccessed,
+      documentPath: item.documentPath,
+      result: item.result || 'success',
+      ipAddress: item.ipAddress || 'browser',
+      userAgent: item.userAgent || navigator.userAgent,
+      timestamp: item.timestamp ? new Date(String(item.timestamp)) : new Date(),
+      sessionId: item.sessionId || generateSessionId(),
+      role: item.role || 'admin',
+      metadata: item.metadata,
+    }))
+  } catch {
+    return []
+  }
+}
+
+function createLocalDashboardStats(): DashboardStats {
+  return {
+    queriesToday: 12,
+    activeUsers: 1,
+    documentsAccessed: 38,
+    blockedQueries: 2,
+    deniedAccess: 0,
+    totalQueriesMonth: 86,
+    avgResponseTime: 1.8,
+  }
+}
+
+function createLocalChartData(period: '7d' | '30d' | '90d'): { timeline: ChartDataPoint[] } {
+  const days = period === '30d' ? 30 : period === '90d' ? 90 : 7
+  const start = new Date()
+  const points = Array.from({ length: days }, (_, index) => {
+    const day = new Date(start)
+    day.setDate(start.getDate() - (days - 1 - index))
+
+    return {
+      date: day.toISOString().slice(0, 10),
+      queries: 8 + (index % 7) * 3,
+      users: 1 + (index % 4),
+      blocked: index % 5 === 0 ? 2 : 0,
+    }
+  })
+
+  return { timeline: points }
+}
+
+function getChatEndpoint(): string {
+  /* if (import.meta.env.DEV) {
+    return '/api/n8n/chat'
+  } */
+
+  return N8N_CHAT_WEBHOOK_URL
+}
 
 /**
  * Fetch com timeout e retry automático
@@ -62,8 +400,17 @@ async function fetchWithRetry<T>(
       throw new Error(`HTTP_ERROR_${response.status}`)
     }
 
-    const data = await response.json() as ApiResponse<T>
-    return data
+    const rawText = await response.text()
+    const trimmed = rawText.trim()
+    const parsed = trimmed ? (() => {
+      try {
+        return JSON.parse(trimmed) as unknown
+      } catch {
+        return trimmed
+      }
+    })() : null
+
+    return normalizeApiResponse<T>(parsed)
 
   } catch (error: unknown) {
     clearTimeout(timeoutId)
@@ -89,28 +436,58 @@ async function fetchWithRetry<T>(
 export async function sendChatMessage(
   payload: ChatPayload
 ): Promise<ApiResponse<ChatApiResponse>> {
-  return fetchWithRetry<ChatApiResponse>(
-    `${N8N_BASE_URL}/chat`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${payload.accessToken}`,
+  if (isLocalTestAccessToken(payload.accessToken)) {
+    return createLocalChatResponse(payload.query)
+  }
+
+  try {
+    const response = await fetchWithRetry<unknown>(
+      getChatEndpoint(),
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${payload.accessToken}`,
+        },
+        body: JSON.stringify({
+          action: 'chat',
+          query: payload.query,
+          prompt: payload.query,
+          input: payload.query,
+          message: payload.query,
+          userId: payload.userId,
+          userName: payload.userName,
+          userEmail: payload.userEmail,
+          userGroups: payload.userGroups,
+          userRoles: payload.userRoles,
+          conversationId: payload.conversationId,
+          context: payload.context?.slice(-10), // Últimas 10 mensagens como contexto
+          metadata: payload.metadata,
+        }),
       },
-      body: JSON.stringify({
-        query: payload.query,
-        userId: payload.userId,
-        userName: payload.userName,
-        userEmail: payload.userEmail,
-        userGroups: payload.userGroups,
-        userRoles: payload.userRoles,
-        conversationId: payload.conversationId,
-        context: payload.context?.slice(-10), // Últimas 10 mensagens como contexto
-        metadata: payload.metadata,
-      }),
-    },
-    2,
-    120000 // 2 minutos para respostas de IA
-  )
+      2,
+      120000 // 2 minutos para respostas de IA
+    )
+
+    const chatData = coerceChatResponse(response.data)
+    if (response.success && chatData) {
+      return {
+        ...response,
+        data: chatData,
+      }
+    }
+
+    /* if (import.meta.env.DEV) {
+      return createLocalChatResponse(payload.query)
+    } */
+
+    throw new Error(response.error || 'Erro na resposta da API')
+  } catch (error) {
+    /* if (import.meta.env.DEV) {
+      return createLocalChatResponse(payload.query)
+    } */
+
+    throw error
+  }
 }
 
 /**
@@ -121,6 +498,10 @@ export async function searchDocuments(
   user: UserProfile,
   filters?: { type?: string; folder?: string }
 ): Promise<ApiResponse<DocumentSource[]>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    return createApiResponse(createLocalDocumentResults(query))
+  }
+
   return fetchWithRetry<DocumentSource[]>(
     `${N8N_BASE_URL}/search`,
     {
@@ -145,6 +526,10 @@ export async function searchDocuments(
 export async function getConversationHistory(
   user: UserProfile
 ): Promise<ApiResponse<{ conversations: Array<{ id: string; title: string; updatedAt: string }> }>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    return createApiResponse(createLocalHistory())
+  }
+
   return fetchWithRetry(
     `${N8N_BASE_URL}/history?userId=${encodeURIComponent(user.id)}`,
     {
@@ -160,6 +545,15 @@ export async function getConversationHistory(
  * Obtém perfil completo do usuário via Microsoft Graph
  */
 export async function getUserProfile(accessToken: string): Promise<UserProfile | null> {
+  if (isLocalTestAccessToken(accessToken)) {
+    const profile = createLocalTestUserProfile()
+    return {
+      ...profile,
+      accessToken: '',
+      idToken: '',
+    }
+  }
+
   try {
     const [profileRes, photoRes] = await Promise.allSettled([
       fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,jobTitle,department,officeLocation,mobilePhone', {
@@ -216,6 +610,10 @@ export async function getUserProfile(accessToken: string): Promise<UserProfile |
  * Obtém grupos do usuário via Microsoft Graph
  */
 export async function getUserGroups(accessToken: string): Promise<string[]> {
+  if (isLocalTestAccessToken(accessToken)) {
+    return ['RH-Sistema-Admin-Local']
+  }
+
   try {
     const res = await fetch('https://graph.microsoft.com/v1.0/me/memberOf?$select=displayName,id', {
       headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -237,6 +635,14 @@ export async function getAuditLogs(
   user: UserProfile,
   filters: AuditFilters
 ): Promise<ApiResponse<{ logs: AuditLog[]; total: number }>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    const logs = readLocalAuditBuffer()
+    return createApiResponse({
+      logs,
+      total: logs.length,
+    })
+  }
+
   const params = new URLSearchParams()
   if (filters.userId) params.set('userId', filters.userId)
   if (filters.startDate) params.set('startDate', filters.startDate.toISOString())
@@ -261,6 +667,10 @@ export async function getAuditLogs(
 export async function getDashboardStats(
   user: UserProfile
 ): Promise<ApiResponse<DashboardStats>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    return createApiResponse(createLocalDashboardStats())
+  }
+
   return fetchWithRetry(
     `${N8N_BASE_URL}/dashboard/stats`,
     {
@@ -279,6 +689,10 @@ export async function getDashboardChartData(
   user: UserProfile,
   period: '7d' | '30d' | '90d' = '7d'
 ): Promise<ApiResponse<{ timeline: ChartDataPoint[] }>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    return createApiResponse(createLocalChartData(period))
+  }
+
   return fetchWithRetry(
     `${N8N_BASE_URL}/dashboard/charts?period=${period}`,
     {

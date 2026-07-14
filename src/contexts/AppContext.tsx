@@ -75,16 +75,27 @@ function appReducer(state: AppState, action: AppAction): AppState {
       }
 
     case 'UPDATE_CONVERSATION': {
-      const updated = state.conversations.map(c =>
-        c.id === action.payload.id ? action.payload : c
-      )
+      const updated = state.conversations.map(c => {
+        if (c.id !== action.payload.id) return c
+
+        return {
+          ...c,
+          ...action.payload,
+          // Nunca perder mensagens já renderizadas quando o update vier com um objeto parcial
+          messages: action.payload.messages.length > 0 ? action.payload.messages : c.messages,
+          createdAt: action.payload.createdAt || c.createdAt,
+          updatedAt: action.payload.updatedAt || c.updatedAt,
+        }
+      })
+      const currentConversation =
+        state.currentConversation?.id === action.payload.id
+          ? updated.find(c => c.id === action.payload.id) || state.currentConversation
+          : state.currentConversation
+
       return {
         ...state,
         conversations: updated,
-        currentConversation:
-          state.currentConversation?.id === action.payload.id
-            ? action.payload
-            : state.currentConversation,
+        currentConversation,
       }
     }
 

@@ -119,7 +119,17 @@ VITE_POST_LOGOUT_URI=https://seu-dominio.com
 
 # Backend n8n
 VITE_N8N_BASE_URL=https://seu-n8n.empresa.com/webhook
+
+# Webhook específico do chat
+VITE_N8N_CHAT_WEBHOOK_URL=https://seu-n8n.empresa.com/webhook/one-drive-tst
+
+# Login local de teste
+VITE_ENABLE_LOCAL_TEST_USER=true
 ```
+
+Se `VITE_N8N_CHAT_WEBHOOK_URL` estiver definido, o chat usa esse endpoint diretamente. Se você já apontar `VITE_N8N_BASE_URL` para um webhook completo como `/webhook/one-drive-tst`, o front também aceita isso.
+
+Se `VITE_ENABLE_LOCAL_TEST_USER=true`, a tela de login mostra um botão adicional para entrar com um usuário local de teste, sem depender do Microsoft Entra ID ou do backend n8n.
 
 ### 2. Azure AD — Registro da Aplicação
 

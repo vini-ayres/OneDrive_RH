@@ -113,6 +113,8 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
   const answer =
     typeof payload.answer === 'string'
       ? payload.answer
+      : typeof payload.reply === 'string'
+        ? payload.reply
       : typeof payload.message === 'string'
         ? payload.message
         : typeof payload.response === 'string'
@@ -128,6 +130,12 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
           : null
 
   if (!answer) return null
+
+  const normalizedAnswer = answer.trim()
+  const looksLikeWorkflowError = /workflow execution failed|internal server error|error executing workflow/i.test(normalizedAnswer)
+  if (looksLikeWorkflowError && !payload.answer) {
+    return null
+  }
 
   const sources = Array.isArray(payload.sources) ? payload.sources as DocumentSource[] : []
   const processingSteps = Array.isArray(payload.processingSteps) ? payload.processingSteps as ProcessingStep[] : []
@@ -145,6 +153,14 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
 
 function isLocalTestAccessToken(accessToken?: string): boolean {
   return accessToken === LOCAL_TEST_ACCESS_TOKEN
+}
+
+function buildN8nAuthHeaders(accessToken?: string): Record<string, string> {
+  if (isLocalTestAccessToken(accessToken) || !accessToken) {
+    return {}
+  }
+
+  return { Authorization: `Bearer ${accessToken}` }
 }
 
 function createApiResponse<T>(data: T, requestId = generateSessionId()): ApiResponse<T> {
@@ -344,11 +360,123 @@ function createLocalChartData(period: '7d' | '30d' | '90d'): { timeline: ChartDa
 }
 
 function getChatEndpoint(): string {
-  /* if (import.meta.env.DEV) {
+  if (import.meta.env.DEV) {
     return '/api/n8n/chat'
-  } */
+  }
 
   return N8N_CHAT_WEBHOOK_URL
+}
+
+function buildN8nChatPayload(payload: ChatPayload): string {
+  const sessionId = payload.metadata?.sessionId || payload.conversationId || generateSessionId()
+
+  return JSON.stringify({
+    query: payload.query,
+    sessionId,
+    session_id: sessionId,
+    conversationId: payload.conversationId,
+    userId: payload.userId,
+  })
+}
+
+function extractHttpErrorMessage(status: number, rawText: string): string {
+  const trimmed = rawText.trim()
+
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      if (isRecord(parsed)) {
+        const message = [parsed.message, parsed.error, parsed.detail]
+          .find(value => typeof value === 'string' && value.trim())
+
+        if (typeof message === 'string') {
+          return message
+        }
+      }
+    } catch {
+      if (trimmed.length <= 300) {
+        return trimmed
+      }
+    }
+  }
+
+  return `HTTP_ERROR_${status}`
+}
+
+/**
+ * Fetch para webhooks n8n — headers mínimos para evitar falha de CORS/preflight.
+ */
+async function fetchN8nWithRetry<T>(
+  url: string,
+  options: RequestInit,
+  retries = 2,
+  timeoutMs = DEFAULT_TIMEOUT
+): Promise<ApiResponse<T>> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  const headersInit: Record<string, string> = {}
+
+  const existingHeaders = options.headers as Record<string, string> | undefined
+  if (existingHeaders) {
+    Object.assign(headersInit, existingHeaders)
+  }
+
+  if (!headersInit['Content-Type'] && !headersInit['content-type']) {
+    headersInit['Content-Type'] = 'application/json'
+  }
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: headersInit,
+      signal: controller.signal,
+      credentials: 'omit',
+    })
+
+    clearTimeout(timeoutId)
+
+    const rawText = await response.text()
+    const trimmed = rawText.trim()
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('UNAUTHORIZED')
+      }
+      if (response.status === 403) {
+        throw new Error('FORBIDDEN')
+      }
+      if (response.status === 429) {
+        throw new Error('RATE_LIMITED')
+      }
+
+      throw new Error(extractHttpErrorMessage(response.status, rawText))
+    }
+
+    const parsed = trimmed ? (() => {
+      try {
+        return JSON.parse(trimmed) as unknown
+      } catch {
+        return trimmed
+      }
+    })() : null
+
+    return normalizeApiResponse<T>(parsed)
+  } catch (error: unknown) {
+    clearTimeout(timeoutId)
+
+    const err = error as Error
+    if (err.name === 'AbortError') {
+      throw new Error('REQUEST_TIMEOUT')
+    }
+
+    if (retries > 0 && !['UNAUTHORIZED', 'FORBIDDEN', 'RATE_LIMITED'].includes(err.message)) {
+      await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)))
+      return fetchN8nWithRetry<T>(url, options, retries - 1, timeoutMs)
+    }
+
+    throw error
+  }
 }
 
 /**
@@ -436,33 +564,13 @@ async function fetchWithRetry<T>(
 export async function sendChatMessage(
   payload: ChatPayload
 ): Promise<ApiResponse<ChatApiResponse>> {
-  if (isLocalTestAccessToken(payload.accessToken)) {
-    return createLocalChatResponse(payload.query)
-  }
-
   try {
-    const response = await fetchWithRetry<unknown>(
+    const response = await fetchN8nWithRetry<unknown>(
       getChatEndpoint(),
       {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${payload.accessToken}`,
-        },
-        body: JSON.stringify({
-          action: 'chat',
-          query: payload.query,
-          prompt: payload.query,
-          input: payload.query,
-          message: payload.query,
-          userId: payload.userId,
-          userName: payload.userName,
-          userEmail: payload.userEmail,
-          userGroups: payload.userGroups,
-          userRoles: payload.userRoles,
-          conversationId: payload.conversationId,
-          context: payload.context?.slice(-10), // Últimas 10 mensagens como contexto
-          metadata: payload.metadata,
-        }),
+        headers: buildN8nAuthHeaders(payload.accessToken),
+        body: buildN8nChatPayload(payload),
       },
       2,
       120000 // 2 minutos para respostas de IA
@@ -476,16 +584,8 @@ export async function sendChatMessage(
       }
     }
 
-    /* if (import.meta.env.DEV) {
-      return createLocalChatResponse(payload.query)
-    } */
-
-    throw new Error(response.error || 'Erro na resposta da API')
+    throw new Error(response.error || response.message || 'Erro na resposta da API')
   } catch (error) {
-    /* if (import.meta.env.DEV) {
-      return createLocalChatResponse(payload.query)
-    } */
-
     throw error
   }
 }

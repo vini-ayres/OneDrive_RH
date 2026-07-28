@@ -10,6 +10,7 @@ import {
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { isSecureUrl } from '../../utils/security'
+import { formatChatMarkdown } from '../../utils/chatMarkdown'
 
 interface MessageBubbleProps {
   message: ChatMessage
@@ -36,24 +37,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     return format(date, "HH:mm 'às' dd/MM/yyyy", { locale: ptBR })
   }
 
-  // Formatar conteúdo com markdown simples
-  const formatContent = (text: string) => {
-    // Converter **bold** → <strong>
-    // Converter *italic* → <em>
-    // Converter `code` → <code>
-    // Converter ### heading → <h3>
-    // Converter - list → <ul>
-    let formatted = text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code class="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono">$1</code>')
-      .replace(/^### (.*$)/gm, '<h3 class="font-semibold text-base mt-3 mb-1">$1</h3>')
-      .replace(/^## (.*$)/gm, '<h2 class="font-bold text-lg mt-3 mb-1">$1</h2>')
-      .replace(/^# (.*$)/gm, '<h1 class="font-bold text-xl mt-3 mb-1">$1</h1>')
-      .replace(/\n/g, '<br />')
-
-    return formatted
-  }
+  // Formatar conteúdo markdown retornado pelo n8n (links, listas, negrito, etc.)
+  const formatContent = (text: string) => formatChatMarkdown(text)
 
   if (isUser) {
     return (

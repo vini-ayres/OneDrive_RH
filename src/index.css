@@ -118,6 +118,39 @@
     @apply bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-2xl rounded-bl-sm px-4 py-3 max-w-[85%];
   }
 
+  .prose-custom .chat-paragraph {
+    @apply mb-3 last:mb-0;
+  }
+
+  .prose-custom .chat-heading {
+    @apply font-semibold text-[var(--text-primary)] mt-3 mb-2 first:mt-0;
+  }
+
+  .prose-custom .chat-ordered-list,
+  .prose-custom .chat-bullet-list {
+    @apply my-3 space-y-3 pl-5;
+  }
+
+  .prose-custom .chat-ordered-list {
+    @apply list-decimal;
+  }
+
+  .prose-custom .chat-bullet-list {
+    @apply list-disc;
+  }
+
+  .prose-custom .chat-list-item {
+    @apply leading-relaxed;
+  }
+
+  .prose-custom .chat-link {
+    @apply text-blue-600 dark:text-blue-400 font-medium underline underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300 break-all;
+  }
+
+  .prose-custom .chat-inline-code {
+    @apply bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-[0.85em] font-mono;
+  }
+
   .typing-dot {
     @apply w-2 h-2 rounded-full bg-[var(--text-muted)] animate-[pulseDot_1.4s_infinite_ease-in-out];
   }

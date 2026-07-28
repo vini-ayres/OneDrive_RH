@@ -179,6 +179,14 @@ export function useChat() {
         errorContent = 'Sua sessão expirou. Por favor, faça login novamente.'
       } else if (err.message === 'FORBIDDEN') {
         errorContent = 'Você não tem permissão para realizar esta consulta.'
+      } else if (/workflow execution failed|executando workflow|workflow falhou/i.test(err.message)) {
+        errorContent = 'O workflow do n8n falhou ao processar a consulta. Verifique a execução no painel do n8n.'
+      } else if (err.message.startsWith('HTTP_ERROR_')) {
+        errorContent = `Erro do servidor (${err.message.replace('HTTP_ERROR_', '')}). Tente novamente.`
+      } else if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+        errorContent = 'Não foi possível conectar ao backend n8n. Verifique a URL do webhook e a conexão de rede.'
+      } else if (err.message && err.message !== 'Erro na resposta da API') {
+        errorContent = err.message
       }
 
       dispatch({

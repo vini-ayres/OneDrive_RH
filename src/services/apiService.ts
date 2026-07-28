@@ -9,7 +9,6 @@ import {
   LOCAL_TEST_USER_EMAIL,
   LOCAL_TEST_USER_ID,
   LOCAL_TEST_USER_NAME,
-  createLocalTestUserProfile,
 } from '../utils/localTestUser'
 
 const N8N_BASE_URL = (import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook').trim()
@@ -639,93 +638,6 @@ export async function getConversationHistory(
       },
     }
   )
-}
-
-/**
- * Obtém perfil completo do usuário via Microsoft Graph
- */
-export async function getUserProfile(accessToken: string): Promise<UserProfile | null> {
-  if (isLocalTestAccessToken(accessToken)) {
-    const profile = createLocalTestUserProfile()
-    return {
-      ...profile,
-      accessToken: '',
-      idToken: '',
-    }
-  }
-
-  try {
-    const [profileRes, photoRes] = await Promise.allSettled([
-      fetch('https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,jobTitle,department,officeLocation,mobilePhone', {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      }),
-      fetch('https://graph.microsoft.com/v1.0/me/photo/$value', {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      })
-    ])
-
-    if (profileRes.status === 'rejected' || !profileRes.value.ok) {
-      return null
-    }
-
-    const profileData = await profileRes.value.json() as {
-      id: string
-      displayName: string
-      mail: string
-      jobTitle: string
-      department: string
-      officeLocation: string
-      mobilePhone: string
-    }
-
-    let photoUrl: string | undefined
-    if (photoRes.status === 'fulfilled' && photoRes.value.ok) {
-      const blob = await photoRes.value.blob()
-      photoUrl = URL.createObjectURL(blob)
-    }
-
-    return {
-      id: profileData.id,
-      displayName: profileData.displayName,
-      email: profileData.mail,
-      jobTitle: profileData.jobTitle || '',
-      department: profileData.department || '',
-      officeLocation: profileData.officeLocation || '',
-      mobilePhone: profileData.mobilePhone || '',
-      photoUrl,
-      roles: [],
-      groups: [],
-      accessToken: '',
-      idToken: '',
-      tenantId: '',
-      sessionStart: new Date(),
-      lastActivity: new Date(),
-    }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Obtém grupos do usuário via Microsoft Graph
- */
-export async function getUserGroups(accessToken: string): Promise<string[]> {
-  if (isLocalTestAccessToken(accessToken)) {
-    return ['RH-Sistema-Admin-Local']
-  }
-
-  try {
-    const res = await fetch('https://graph.microsoft.com/v1.0/me/memberOf?$select=displayName,id', {
-      headers: { 'Authorization': `Bearer ${accessToken}` }
-    })
-
-    if (!res.ok) return []
-
-    const data = await res.json() as { value: Array<{ displayName: string; id: string }> }
-    return data.value.map(g => g.displayName).filter(Boolean)
-  } catch {
-    return []
-  }
 }
 
 /**

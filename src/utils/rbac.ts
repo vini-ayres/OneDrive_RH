@@ -1,7 +1,7 @@
 import { UserRole, Permission, ROLE_PERMISSIONS, ROLE_GROUP_MAP, UserProfile } from '../types'
 
 /**
- * Determina os papéis do usuário baseado nos grupos do Azure AD
+ * Determina os papéis do usuário baseado nos grupos do Active Directory
  */
 export function getRolesFromGroups(groups: string[]): UserRole[] {
   const roles: Set<UserRole> = new Set()

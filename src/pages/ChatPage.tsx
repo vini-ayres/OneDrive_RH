@@ -63,7 +63,7 @@ export function ChatPage() {
               <FeatureCard
                 icon={<Shield size={20} className="text-green-600" />}
                 title="Acesso Seguro"
-                description="Controle de acesso baseado no seu perfil e grupos do Azure AD"
+                description="Controle de acesso baseado no seu perfil e grupos do Active Directory"
               />
               <FeatureCard
                 icon={<Sparkles size={20} className="text-purple-600" />}

@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
   const parsedWebhook = new URL(chatWebhook)
   const webhookPath = parsedWebhook.pathname.replace(/\/+$/, '') || '/'
 
+  const authApiUrl = env.VITE_AUTH_API_URL || 'http://localhost:8080/api/auth'
+  const parsedAuth = new URL(authApiUrl)
+  const authPathPrefix = parsedAuth.pathname.replace(/\/+$/, '') || '/api/auth'
+
   return {
     plugins: [react()],
     resolve: {
@@ -22,7 +26,6 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks: {
             vendor: ['react', 'react-dom'],
-            msal: ['@azure/msal-browser', '@azure/msal-react'],
             charts: ['recharts'],
             query: ['@tanstack/react-query'],
           }
@@ -39,6 +42,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: () => webhookPath,
+        },
+        '/api/auth': {
+          target: parsedAuth.origin,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/api\/auth/, authPathPrefix),
         },
       },
     },

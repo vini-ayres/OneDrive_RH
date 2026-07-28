@@ -38,7 +38,7 @@ export function SettingsPage() {
         <div className="card">
           <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4">
             <User size={15} />
-            Perfil Microsoft 365
+            Perfil Corporativo
           </h3>
           <div className="flex items-start gap-4">
             <Avatar src={user.photoUrl} name={user.displayName} size="xl" />
@@ -65,8 +65,8 @@ export function SettingsPage() {
           {/* Account details */}
           <div className="mt-4 pt-4 border-t border-[var(--border-color)] grid grid-cols-2 gap-3 text-xs">
             <div>
-              <p className="text-[var(--text-muted)] font-medium">Tenant ID</p>
-              <p className="text-[var(--text-secondary)] font-mono mt-0.5 truncate">{user.tenantId || 'N/A'}</p>
+              <p className="text-[var(--text-muted)] font-medium">Usuário</p>
+              <p className="text-[var(--text-secondary)] font-mono mt-0.5 truncate">{user.username || user.email}</p>
             </div>
             <div>
               <p className="text-[var(--text-muted)] font-medium">Sessão iniciada</p>
@@ -75,7 +75,7 @@ export function SettingsPage() {
               </p>
             </div>
             <div>
-              <p className="text-[var(--text-muted)] font-medium">Grupos Azure AD</p>
+              <p className="text-[var(--text-muted)] font-medium">Grupos do Domínio</p>
               <p className="text-[var(--text-secondary)] mt-0.5">{user.groups.length} grupo(s)</p>
             </div>
             <div>

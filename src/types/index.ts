@@ -21,6 +21,7 @@ export interface Permission {
 // Perfil do usuário autenticado
 export interface UserProfile {
   id: string
+  username: string
   displayName: string
   email: string
   jobTitle: string
@@ -31,8 +32,6 @@ export interface UserProfile {
   roles: UserRole[]
   groups: string[]
   accessToken: string
-  idToken: string
-  tenantId: string
   sessionStart: Date
   lastActivity: Date
 }
@@ -193,8 +192,7 @@ export interface AppSettings {
   sessionTimeout: number // minutos
   notificationsEnabled: boolean
   n8nBaseUrl: string
-  azureClientId: string
-  azureTenantId: string
+  authApiUrl: string
 }
 
 // Estado da aplicação
@@ -210,9 +208,9 @@ export interface AppState {
   sessionExpiresAt: Date | null
 }
 
-// Grupos Azure AD mapeados para roles
+// Grupos do Active Directory mapeados para roles
 export const ROLE_GROUP_MAP: Record<string, UserRole> = {
-  // Substitua pelos IDs/nomes reais dos grupos no Azure AD
+  // Substitua pelos nomes reais dos grupos no domínio AD
   'RH-Sistema-Diretoria': 'diretoria',
   'RH-Sistema-RH': 'rh',
   'RH-Sistema-Gestores': 'gestor',

@@ -5,7 +5,7 @@
 Sistema web corporativo moderno e seguro para consulta e análise inteligente de documentos armazenados no **Microsoft OneDrive** e **SharePoint**, integrado com backend **n8n** via API REST.
 
 Desenvolvido para o setor de Recursos Humanos, com:
-- Autenticação corporativa via **Microsoft Entra ID (Azure AD)**
+- Autenticação corporativa via **Active Directory (LDAP Bind)**
 - Controle de acesso baseado em papéis (**RBAC**)
 - Conformidade com **LGPD**
 - Interface semelhante ao **ChatGPT Enterprise**
@@ -14,12 +14,12 @@ Desenvolvido para o setor de Recursos Humanos, com:
 
 ## Funcionalidades Implementadas
 
-### ✅ Autenticação Microsoft Entra ID
-- OAuth 2.0 + OpenID Connect (MSAL v3)
-- Single Sign-On (SSO) corporativo
-- Renovação automática de tokens
+### ✅ Autenticação Active Directory (LDAP)
+- Login com usuário e senha do domínio corporativo
+- Autenticação via LDAP Bind no backend
+- Grupos do AD mapeados para perfis RBAC
 - Timeout de sessão: 30 minutos de inatividade
-- Exibição de perfil: nome, email, foto, departamento, cargo
+- Exibição de perfil: nome, email, departamento, cargo
 
 ### ✅ Controle de Acesso (RBAC)
 | Perfil | Permissões |
@@ -64,8 +64,6 @@ Desenvolvido para o setor de Recursos Humanos, com:
 
 ```
 src/
-├── auth/
-│   └── msalConfig.ts          # Configuração Microsoft MSAL
 ├── components/
 │   ├── chat/
 │   │   ├── MessageBubble.tsx  # Mensagens do chat
@@ -92,7 +90,8 @@ src/
 │   ├── DocumentsPage.tsx      # Documentos recentes
 │   └── LoginPage.tsx          # Tela de login
 ├── services/
-│   └── apiService.ts          # Integração com n8n e Microsoft Graph
+│   ├── authService.ts         # Autenticação LDAP (Active Directory)
+│   └── apiService.ts          # Integração com n8n
 ├── types/
 │   └── index.ts               # Tipos TypeScript
 └── utils/
@@ -109,13 +108,8 @@ src/
 Copie `.env.example` para `.env` e configure:
 
 ```env
-# Microsoft Entra ID (OBRIGATÓRIO)
-VITE_AZURE_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-VITE_AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-# URLs de redirecionamento
-VITE_REDIRECT_URI=https://seu-dominio.com
-VITE_POST_LOGOUT_URI=https://seu-dominio.com
+# API de autenticação LDAP
+VITE_AUTH_API_URL=http://localhost:8080/api/auth
 
 # Backend n8n
 VITE_N8N_BASE_URL=https://seu-n8n.empresa.com/webhook
@@ -129,21 +123,32 @@ VITE_ENABLE_LOCAL_TEST_USER=true
 
 Se `VITE_N8N_CHAT_WEBHOOK_URL` estiver definido, o chat usa esse endpoint diretamente. Se você já apontar `VITE_N8N_BASE_URL` para um webhook completo como `/webhook/one-drive-tst`, o front também aceita isso.
 
-Se `VITE_ENABLE_LOCAL_TEST_USER=true`, a tela de login mostra um botão adicional para entrar com um usuário local de teste, sem depender do Microsoft Entra ID ou do backend n8n.
+Se `VITE_ENABLE_LOCAL_TEST_USER=true`, a tela de login mostra um botão adicional para entrar com um usuário local de teste, sem depender do Active Directory ou do backend n8n.
 
-### 2. Azure AD — Registro da Aplicação
+### 2. Backend de Autenticação LDAP
 
-1. Acesse **Azure Portal → Entra ID → App Registrations**
-2. Registre uma nova aplicação
-3. Tipo de conta: "Accounts in this organizational directory only"
-4. Redirect URI: `https://seu-dominio.com` (tipo SPA)
-5. Em **API Permissions**, adicione:
-   - `User.Read`
-   - `GroupMember.Read.All`
-   - `openid`, `profile`, `email`, `offline_access`
-6. Copie **Application (client) ID** e **Directory (tenant) ID** para o `.env`
+O frontend envia `POST /api/auth/login` com `{ username, password }` e espera:
 
-### 3. Mapeamento de Grupos Azure AD
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "jwt-ou-token-de-sessao",
+    "user": {
+      "id": "usuario",
+      "displayName": "Nome Completo",
+      "email": "usuario@empresa.com",
+      "groups": ["RH-Sistema-RH"],
+      "jobTitle": "Analista",
+      "department": "Recursos Humanos"
+    }
+  }
+}
+```
+
+Em desenvolvimento, o Vite faz proxy de `/api/auth` para `VITE_AUTH_API_URL`.
+
+### 3. Mapeamento de Grupos do Active Directory
 
 Edite `src/types/index.ts` e configure `ROLE_GROUP_MAP` com os nomes/IDs reais dos seus grupos:
 
@@ -174,7 +179,7 @@ Configure os webhooks no n8n para os endpoints:
 |-----------|-----------|
 | Frontend | React 18 + TypeScript |
 | Estilização | TailwindCSS v3 |
-| Autenticação | @azure/msal-browser + @azure/msal-react |
+| Autenticação | Active Directory (LDAP Bind) via API REST |
 | Estado | React Context API + useReducer |
 | Server State | @tanstack/react-query |
 | Gráficos | Recharts |

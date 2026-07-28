@@ -1,5 +1,4 @@
 import { UserProfile } from '../types'
-import { generateSessionId } from './security'
 
 export const LOCAL_TEST_ACCESS_TOKEN = 'local-test-token'
 export const LOCAL_TEST_USER_ID = 'local-test-user'
@@ -19,6 +18,7 @@ export function createLocalTestUserProfile(): UserProfile {
 
   return {
     id: LOCAL_TEST_USER_ID,
+    username: 'teste.local',
     displayName: LOCAL_TEST_USER_NAME,
     email: LOCAL_TEST_USER_EMAIL,
     jobTitle: 'Analista de Testes',
@@ -29,8 +29,6 @@ export function createLocalTestUserProfile(): UserProfile {
     roles: ['admin'],
     groups: ['RH-Sistema-Admin-Local'],
     accessToken: LOCAL_TEST_ACCESS_TOKEN,
-    idToken: generateSessionId(),
-    tenantId: 'local-development',
     sessionStart: now,
     lastActivity: now,
   }

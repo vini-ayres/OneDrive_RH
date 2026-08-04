@@ -1,30 +1,93 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { MessageBubble } from '../components/chat/MessageBubble'
 import { ChatInput } from '../components/chat/ChatInput'
 import { useApp } from '../contexts/AppContext'
-import { Shield, FileSearch, MessageSquare, Sparkles } from 'lucide-react'
+import { Shield, FileSearch, Sparkles } from 'lucide-react'
 import { RoleBadge } from '../components/ui/Badge'
 import { getHighestRole } from '../utils/rbac'
+
+const SCROLL_THRESHOLD = 100
 
 export function ChatPage() {
   const { state } = useApp()
   const { user, currentConversation } = state
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const messagesListRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const conversationIdRef = useRef<string | null>(null)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  }, [])
 
-  useEffect(() => {
-    scrollToBottom()
+  const checkIfNearBottom = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return true
+    const { scrollTop, scrollHeight, clientHeight } = container
+    return scrollHeight - scrollTop - clientHeight <= SCROLL_THRESHOLD
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    isNearBottomRef.current = checkIfNearBottom()
+  }, [checkIfNearBottom])
+
+  const shouldAutoScroll = useCallback(() => {
+    if (isNearBottomRef.current) return true
+
+    const messages = currentConversation?.messages
+    if (!messages?.length) return false
+
+    const last = messages[messages.length - 1]
+    return last.role === 'user' || last.status === 'sending'
   }, [currentConversation?.messages])
+
+  // Ao trocar de conversa, rolar sempre para o fim
+  useEffect(() => {
+    const convId = currentConversation?.id ?? null
+    if (convId === conversationIdRef.current) return
+
+    conversationIdRef.current = convId
+    isNearBottomRef.current = true
+    requestAnimationFrame(() => scrollToBottom('auto'))
+  }, [currentConversation?.id, scrollToBottom])
+
+  // Ao mudar mensagens, rolar se o usuário estiver perto do fim ou acabou de enviar
+  useLayoutEffect(() => {
+    if (!currentConversation?.messages.length) return
+    if (!shouldAutoScroll()) return
+
+    scrollToBottom('auto')
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToBottom('auto'))
+    })
+  }, [currentConversation?.messages, shouldAutoScroll, scrollToBottom])
+
+  // Observar expansão de conteúdo (markdown, fontes, animações)
+  useEffect(() => {
+    const list = messagesListRef.current
+    if (!list) return
+
+    const observer = new ResizeObserver(() => {
+      if (shouldAutoScroll()) {
+        scrollToBottom('auto')
+      }
+    })
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [currentConversation?.id, shouldAutoScroll, scrollToBottom])
 
   const hasMessages = currentConversation && currentConversation.messages.length > 0
 
   return (
     <div className="flex flex-col h-full">
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
         {!hasMessages ? (
           // Welcome screen
           <div className="flex flex-col items-center justify-center h-full px-4 py-12">
@@ -82,11 +145,13 @@ export function ChatPage() {
           </div>
         ) : (
           // Messages list
-          <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+          <div
+            ref={messagesListRef}
+            className="max-w-3xl mx-auto px-4 py-6 space-y-6"
+          >
             {currentConversation.messages.map(message => (
               <MessageBubble key={message.id} message={message} />
             ))}
-            <div ref={messagesEndRef} />
           </div>
         )}
       </div>

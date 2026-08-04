@@ -153,12 +153,20 @@ export function useChat() {
           }
         })
 
-        // Atualizar título da conversa com base na primeira mensagem
-        if (conversation.messages.length <= 2) {
+        // Atualizar título apenas na primeira mensagem (evita sobrescrever mensagens com snapshot stale)
+        if (conversation.title === 'Nova Conversa') {
           const title = safe.length > 50 ? safe.substring(0, 50) + '...' : safe
           dispatch({
             type: 'UPDATE_CONVERSATION',
-            payload: { ...conversation, title }
+            payload: {
+              id: conversation.id,
+              title,
+              messages: [],
+              createdAt: conversation.createdAt,
+              updatedAt: new Date(),
+              isFavorite: conversation.isFavorite,
+              userId: conversation.userId,
+            }
           })
         }
       } else {

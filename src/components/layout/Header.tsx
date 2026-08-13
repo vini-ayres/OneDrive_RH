@@ -51,9 +51,15 @@ export function Header() {
         <button
           onClick={toggleSidebar}
           className="btn-ghost p-2"
-          aria-label="Toggle sidebar"
+          aria-label={sidebarOpen ? 'Fechar menu lateral' : 'Abrir menu lateral'}
+          aria-pressed={sidebarOpen}
         >
-          <Menu size={18} />
+          <Menu
+            size={18}
+            className={`transition-transform duration-300 ease-out ${
+              sidebarOpen ? 'rotate-90 scale-95' : 'rotate-0 scale-100'
+            }`}
+          />
         </button>
 
         <div className="flex items-center gap-2">

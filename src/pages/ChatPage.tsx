@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, DragEvent } from 'react'
 import { MessageBubble } from '../components/chat/MessageBubble'
 import { ChatInput } from '../components/chat/ChatInput'
 import { useApp } from '../contexts/AppContext'
-import { Shield, FileSearch, Sparkles } from 'lucide-react'
+import { Shield, FileSearch, Sparkles, Upload } from 'lucide-react'
 import { RoleBadge } from '../components/ui/Badge'
 import { getHighestRole } from '../utils/rbac'
+import { formatFileSize, MAX_UPLOAD_BYTES } from '../utils/uploadHelpers'
 
 const SCROLL_THRESHOLD = 100
 
@@ -15,6 +16,9 @@ export function ChatPage() {
   const messagesListRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const conversationIdRef = useRef<string | null>(null)
+  const dragDepthRef = useRef(0)
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = scrollContainerRef.current
@@ -80,8 +84,69 @@ export function ChatPage() {
 
   const hasMessages = currentConversation && currentConversation.messages.length > 0
 
+  const hasFilePayload = (event: DragEvent) =>
+    Array.from(event.dataTransfer?.types || []).includes('Files')
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFilePayload(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setIsDraggingFile(true)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFilePayload(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) {
+      setIsDraggingFile(false)
+    }
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFilePayload(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFilePayload(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      setPendingFile(file)
+    }
+  }
+
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="relative flex flex-col h-full"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDraggingFile && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-blue-600/10 backdrop-blur-[1px] border-2 border-dashed border-blue-500 rounded-xl m-2 pointer-events-none">
+          <div className="flex flex-col items-center gap-2 px-6 py-5 bg-[var(--bg-primary)]/95 rounded-2xl border border-blue-300 dark:border-blue-700 shadow-lg">
+            <Upload size={28} className="text-blue-600" />
+            <p className="text-sm font-semibold text-[var(--text-primary)]">
+              Solte o arquivo para anexar ao chat
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">
+              Limite de {formatFileSize(MAX_UPLOAD_BYTES)}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Messages area */}
       <div
         ref={scrollContainerRef}
@@ -157,7 +222,10 @@ export function ChatPage() {
       </div>
 
       {/* Chat input */}
-      <ChatInput />
+      <ChatInput
+        pendingFile={pendingFile}
+        onPendingFileHandled={() => setPendingFile(null)}
+      />
     </div>
   )
 }

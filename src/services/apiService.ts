@@ -1,9 +1,11 @@
 import { 
   ChatPayload, ChatApiResponse, ApiResponse, 
   AuditLog, AuditFilters, DashboardStats,
-  ChartDataPoint, DocumentSource, ProcessingStep, UserProfile
+  ChartDataPoint, DocumentSource, ProcessingStep, UserProfile,
+  UploadPayload, UploadApiResponse,
 } from '../types'
 import { generateCsrfToken, generateSessionId } from '../utils/security'
+import { fileToBase64 } from '../utils/uploadHelpers'
 import {
   LOCAL_TEST_ACCESS_TOKEN,
   LOCAL_TEST_USER_EMAIL,
@@ -15,6 +17,10 @@ const N8N_BASE_URL = (import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:567
 const N8N_CHAT_WEBHOOK_URL = (
   import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL?.trim() ||
   resolveChatWebhookUrl(N8N_BASE_URL)
+).replace(/\/+$/, '')
+const N8N_UPLOAD_WEBHOOK_URL = (
+  import.meta.env.VITE_N8N_UPLOAD_WEBHOOK_URL?.trim() ||
+  resolveUploadWebhookUrl(N8N_BASE_URL)
 ).replace(/\/+$/, '')
 
 // Timeout padrão de 60 segundos
@@ -42,6 +48,24 @@ function resolveChatWebhookUrl(baseUrl: string): string {
   }
 
   return normalized
+}
+
+function resolveNamedWebhookUrl(baseUrl: string, webhookName: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '')
+
+  if (normalized.endsWith('/webhook')) {
+    return `${normalized}/${webhookName}`
+  }
+
+  if (normalized.includes('/webhook/')) {
+    return `${normalized.replace(/\/webhook\/[^/]+\/?$/, '/webhook')}/${webhookName}`
+  }
+
+  return `${normalized}/${webhookName}`
+}
+
+function resolveUploadWebhookUrl(baseUrl: string): string {
+  return resolveNamedWebhookUrl(baseUrl, 'upload-onedrive')
 }
 
 function normalizeApiResponse<T>(payload: unknown): ApiResponse<T> {
@@ -366,6 +390,14 @@ function getChatEndpoint(): string {
   return N8N_CHAT_WEBHOOK_URL
 }
 
+function getUploadEndpoint(): string {
+  if (import.meta.env.DEV) {
+    return '/api/n8n/upload'
+  }
+
+  return N8N_UPLOAD_WEBHOOK_URL
+}
+
 function buildN8nChatPayload(payload: ChatPayload): string {
   const sessionId = payload.metadata?.sessionId || payload.conversationId || generateSessionId()
 
@@ -404,6 +436,7 @@ function extractHttpErrorMessage(status: number, rawText: string): string {
 
 /**
  * Fetch para webhooks n8n — headers mínimos para evitar falha de CORS/preflight.
+ * Para FormData, não define Content-Type (o browser monta o boundary).
  */
 async function fetchN8nWithRetry<T>(
   url: string,
@@ -421,8 +454,23 @@ async function fetchN8nWithRetry<T>(
     Object.assign(headersInit, existingHeaders)
   }
 
-  if (!headersInit['Content-Type'] && !headersInit['content-type']) {
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+  const method = (options.method || 'GET').toUpperCase()
+
+  if (
+    method !== 'GET' &&
+    method !== 'HEAD' &&
+    !isFormData &&
+    !headersInit['Content-Type'] &&
+    !headersInit['content-type']
+  ) {
     headersInit['Content-Type'] = 'application/json'
+  }
+
+  // Multipart: remover Content-Type forçado para o browser definir o boundary
+  if (isFormData) {
+    delete headersInit['Content-Type']
+    delete headersInit['content-type']
   }
 
   try {
@@ -587,6 +635,152 @@ export async function sendChatMessage(
   } catch (error) {
     throw error
   }
+}
+
+function coerceUploadResponse(payload: unknown): UploadApiResponse | null {
+  if (payload == null) {
+    return { success: true, message: 'Upload concluído com sucesso.' }
+  }
+
+  if (typeof payload === 'string') {
+    const text = payload.trim()
+    return text
+      ? { success: true, answer: text, message: text }
+      : { success: true, message: 'Upload concluído com sucesso.' }
+  }
+
+  // Formato do webhook: [{ "text": "..." }, ...]
+  if (Array.isArray(payload)) {
+    const texts = payload
+      .map(item => {
+        if (typeof item === 'string') return item.trim()
+        if (isRecord(item) && typeof item.text === 'string') return item.text.trim()
+        if (isRecord(item) && typeof item.answer === 'string') return item.answer.trim()
+        if (isRecord(item) && typeof item.message === 'string') return item.message.trim()
+        return ''
+      })
+      .filter(Boolean)
+
+    if (texts.length > 0) {
+      const answer = texts.join('\n\n')
+      return { success: true, answer, message: answer }
+    }
+
+    if (payload.length > 0) {
+      return coerceUploadResponse(payload[0])
+    }
+
+    return null
+  }
+
+  if (!isRecord(payload)) return null
+
+  if ('json' in payload && payload.json !== undefined) {
+    const nested = coerceUploadResponse(payload.json)
+    if (nested?.answer || nested?.message) return nested
+  }
+
+  if ('body' in payload && payload.body !== undefined) {
+    const nested = coerceUploadResponse(payload.body)
+    if (nested?.answer || nested?.message) return nested
+  }
+
+  if ('data' in payload && payload.data !== undefined && !isRecord(payload.file)) {
+    const nested = coerceUploadResponse(payload.data)
+    if (nested?.answer || nested?.message) return nested
+  }
+
+  const file = isRecord(payload.file) ? payload.file : undefined
+  const text =
+    (typeof payload.text === 'string' && payload.text.trim()) ||
+    (typeof payload.answer === 'string' && payload.answer.trim()) ||
+    (typeof payload.message === 'string' && payload.message.trim()) ||
+    (typeof payload.result === 'string' && payload.result.trim()) ||
+    (typeof payload.output === 'string' && payload.output.trim()) ||
+    undefined
+
+  if (!text && !file) {
+    // Objeto sem texto útil — evita resposta vazia no chat
+    return null
+  }
+
+  return {
+    success: typeof payload.success === 'boolean' ? payload.success : true,
+    message: text,
+    answer: text,
+    file: file
+      ? {
+          id: typeof file.id === 'string' ? file.id : undefined,
+          name: typeof file.name === 'string' ? file.name : undefined,
+          webUrl: typeof file.webUrl === 'string' ? file.webUrl : undefined,
+          path: typeof file.path === 'string' ? file.path : undefined,
+          size: typeof file.size === 'number' ? file.size : undefined,
+        }
+      : undefined,
+    requestId: typeof payload.requestId === 'string' ? payload.requestId : undefined,
+  }
+}
+
+/**
+ * Envia o arquivo em base64 dentro de um JSON para o webhook upload-onedrive.
+ * No n8n: use "Convert to File" / "Move Base64 String to File" com o campo fileBase64.
+ */
+export async function uploadFileToOneDrive(
+  payload: UploadPayload
+): Promise<ApiResponse<UploadApiResponse>> {
+  const sessionId = payload.metadata.sessionId || payload.conversationId || generateSessionId()
+  const mimeType = payload.file.type || 'application/octet-stream'
+  const fileBase64 = await fileToBase64(payload.file)
+
+  const jsonPayload = {
+    query: payload.query,
+    folderPath: payload.folderPath,
+    fileName: payload.file.name,
+    mimeType,
+    fileSize: payload.file.size,
+    // Base64 puro (sem data:...) — ideal para Convert to File no n8n
+    fileBase64,
+    // Alternativa com data URI, se o node preferir
+    fileDataUri: `data:${mimeType};base64,${fileBase64}`,
+    sessionId,
+    session_id: sessionId,
+    conversationId: payload.conversationId,
+    userId: payload.userId,
+    userName: payload.userName,
+    userEmail: payload.userEmail,
+    userGroups: payload.userGroups,
+    userRoles: payload.userRoles,
+    timestamp: payload.metadata.timestamp,
+  }
+
+  const response = await fetchN8nWithRetry<unknown>(
+    getUploadEndpoint(),
+    {
+      method: 'POST',
+      headers: {
+        ...buildN8nAuthHeaders(payload.accessToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(jsonPayload),
+    },
+    1,
+    180000
+  )
+
+  const uploadData = coerceUploadResponse(response.data)
+  if (response.success && uploadData && uploadData.success !== false) {
+    return {
+      ...response,
+      data: uploadData,
+    }
+  }
+
+  throw new Error(
+    response.error ||
+    response.message ||
+    uploadData?.message ||
+    'Erro no upload do arquivo'
+  )
 }
 
 /**

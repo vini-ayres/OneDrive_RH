@@ -25,8 +25,6 @@ export function Sidebar() {
   const [searchQuery, setSearchQuery] = useState('')
   const [hoveredConv, setHoveredConv] = useState<string | null>(null)
 
-  if (!sidebarOpen) return null
-
   const canViewAudit = hasPermission(user, 'canViewAuditLog')
   const canViewDashboard = hasPermission(user, 'canViewDashboard')
 
@@ -73,12 +71,19 @@ export function Sidebar() {
     view: 'settings',
   })
 
+  const closeSidebarOnMobile = () => {
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      dispatch({ type: 'SET_SIDEBAR', payload: false })
+    }
+  }
+
   const handleNavClick = (item: NavItem) => {
     if (item.action) {
       item.action()
     } else if (item.view) {
       dispatch({ type: 'SET_VIEW', payload: item.view as typeof activeView })
     }
+    closeSidebarOnMobile()
   }
 
   const filteredConversations = conversations.filter(conv =>
@@ -91,6 +96,7 @@ export function Sidebar() {
   const handleConvClick = (conv: Conversation) => {
     dispatch({ type: 'SET_CONVERSATION', payload: conv })
     dispatch({ type: 'SET_VIEW', payload: 'chat' })
+    closeSidebarOnMobile()
   }
 
   const toggleFavorite = (e: React.MouseEvent, conv: Conversation) => {
@@ -144,21 +150,29 @@ export function Sidebar() {
   )
 
   return (
-    <aside className="w-[260px] flex-shrink-0 h-full border-r border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col overflow-hidden">
+    <aside
+      className={`sidebar-panel h-full border-r border-[var(--border-color)] bg-[var(--bg-secondary)] flex flex-col ${
+        sidebarOpen ? '' : 'sidebar-panel--closed'
+      }`}
+      aria-hidden={!sidebarOpen}
+    >
       {/* Navigation items */}
-      <nav className="p-3 space-y-1">
+      <nav className="p-3 space-y-1 min-w-[var(--sidebar-width)]">
         {navItems.map(item => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item)}
-            className={`sidebar-item w-full text-left ${
+            className={`sidebar-item sidebar-nav-item group w-full text-left ${
               item.view && activeView === item.view ? 'active' : ''
             }`}
           >
             {item.icon}
             <span>{item.label}</span>
             {item.view && (
-              <ChevronRight size={14} className="ml-auto opacity-0 group-hover:opacity-100" />
+              <ChevronRight
+                size={14}
+                className="ml-auto opacity-0 translate-x-[-4px] transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0"
+              />
             )}
           </button>
         ))}
@@ -167,7 +181,7 @@ export function Sidebar() {
       <hr className="border-[var(--border-color)] mx-3" />
 
       {/* Conversations section */}
-      <div className="flex-1 overflow-hidden flex flex-col min-h-0 p-3">
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0 p-3 min-w-[var(--sidebar-width)]">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
             Conversas
@@ -236,7 +250,7 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t border-[var(--border-color)]">
+      <div className="p-3 border-t border-[var(--border-color)] min-w-[var(--sidebar-width)]">
         <div className="flex items-center gap-2 px-2">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
           <span className="text-xs text-[var(--text-muted)]">

@@ -13,7 +13,7 @@ import { useAuth } from './hooks/useAuth'
 import { Loader2, Shield } from 'lucide-react'
 
 function AppContent() {
-  const { state } = useApp()
+  const { state, dispatch } = useApp()
   const { isLoading, isAuthenticated } = useAuth()
 
   if (isLoading) {
@@ -61,18 +61,23 @@ function AppContent() {
       <Header />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {state.sidebarOpen && (
-          <>
-            <div
-              className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-              onClick={() => {}}
-            />
-            <Sidebar />
-          </>
-        )}
+        <div
+          className={`sidebar-overlay fixed inset-0 z-30 bg-black/40 lg:hidden ${
+            state.sidebarOpen ? 'sidebar-overlay--visible' : 'sidebar-overlay--hidden'
+          }`}
+          onClick={() => dispatch({ type: 'SET_SIDEBAR', payload: false })}
+          aria-hidden={!state.sidebarOpen}
+        />
+
+        <Sidebar />
 
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {renderPage()}
+          <div
+            key={state.activeView}
+            className="flex-1 flex flex-col min-h-0 animate-page-enter"
+          >
+            {renderPage()}
+          </div>
         </main>
       </div>
 

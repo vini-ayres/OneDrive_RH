@@ -1,8 +1,14 @@
-import React, { useState, useRef, useCallback, KeyboardEvent } from 'react'
-import { Send, Mic, Paperclip, AlertCircle, Lock } from 'lucide-react'
+import React, { useState, useRef, useCallback, KeyboardEvent, useEffect } from 'react'
+import { Send, Paperclip, AlertCircle, Lock, X, FileText } from 'lucide-react'
 import { useChat } from '../../hooks/useChat'
 import { useApp } from '../../contexts/AppContext'
 import { hasPermission } from '../../utils/rbac'
+import {
+  formatFileSize,
+  releaseLocalFile,
+  validateUploadFile,
+  MAX_UPLOAD_BYTES,
+} from '../../utils/uploadHelpers'
 
 const EXAMPLE_QUERIES = [
   "Localize o contrato de trabalho de João Silva",
@@ -12,16 +18,64 @@ const EXAMPLE_QUERIES = [
   "Quais documentos foram modificados esta semana?",
 ]
 
-export function ChatInput() {
+interface ChatInputProps {
+  /** Arquivo arrastado na área do chat (importação automática) */
+  pendingFile?: File | null
+  onPendingFileHandled?: () => void
+}
+
+export function ChatInput({ pendingFile = null, onPendingFileHandled }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [charCount, setCharCount] = useState(0)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [sendingUpload, setSendingUpload] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { sendMessage, isProcessing } = useChat()
   const { state } = useApp()
   const { user } = state
 
   const MAX_CHARS = 2000
-  const canSend = input.trim().length > 0 && !isProcessing && charCount <= MAX_CHARS
+  const canSend = input.trim().length > 0 && !isProcessing && charCount <= MAX_CHARS && !fileError
+
+  const clearSelectedFile = useCallback(() => {
+    releaseLocalFile({ objectUrl: previewUrl, input: fileInputRef.current })
+    setPreviewUrl(null)
+    setSelectedFile(null)
+    setFileError(null)
+  }, [previewUrl])
+
+  const applySelectedFile = useCallback((file: File) => {
+    const check = validateUploadFile(file)
+    if (!check.ok) {
+      setSelectedFile(null)
+      setFileError(check.reason)
+      releaseLocalFile({ objectUrl: previewUrl, input: fileInputRef.current })
+      setPreviewUrl(null)
+      return
+    }
+
+    releaseLocalFile({ objectUrl: previewUrl })
+    setPreviewUrl(URL.createObjectURL(file))
+    setSelectedFile(file)
+    setFileError(null)
+    textareaRef.current?.focus()
+  }, [previewUrl])
+
+  useEffect(() => {
+    return () => {
+      releaseLocalFile({ objectUrl: previewUrl })
+    }
+  }, [previewUrl])
+
+  // Importa automaticamente arquivo arrastado na área do chat
+  useEffect(() => {
+    if (!pendingFile || isProcessing) return
+    applySelectedFile(pendingFile)
+    onPendingFileHandled?.()
+  }, [pendingFile, isProcessing, applySelectedFile, onPendingFileHandled])
 
   const adjustTextareaHeight = useCallback(() => {
     const textarea = textareaRef.current
@@ -46,9 +100,17 @@ export function ChatInput() {
     }
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    applySelectedFile(file)
+  }
+
   const handleSend = async () => {
     const trimmed = input.trim()
-    if (!trimmed || isProcessing) return
+    if (!trimmed || isProcessing || fileError) return
+
+    const fileToSend = selectedFile
 
     setInput('')
     setCharCount(0)
@@ -56,7 +118,15 @@ export function ChatInput() {
       textareaRef.current.style.height = 'auto'
     }
 
-    await sendMessage(trimmed)
+    setSendingUpload(!!fileToSend)
+    // Limpa o anexo da UI imediatamente; o File segue em memória até o fim do upload
+    clearSelectedFile()
+
+    try {
+      await sendMessage(trimmed, fileToSend)
+    } finally {
+      setSendingUpload(false)
+    }
   }
 
   const handleExampleClick = (query: string) => {
@@ -88,16 +158,53 @@ export function ChatInput() {
 
       {/* Input area */}
       <div className="max-w-3xl mx-auto">
+        {selectedFile && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl">
+            <FileText size={14} className="text-blue-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-[var(--text-primary)] truncate">
+                {selectedFile.name}
+              </p>
+              <p className="text-[10px] text-[var(--text-muted)]">
+                {formatFileSize(selectedFile.size)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearSelectedFile}
+              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+              title="Remover arquivo"
+              disabled={isProcessing}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <div className={`relative flex items-end gap-2 p-3 bg-[var(--bg-secondary)] border rounded-2xl transition-all ${
-          isAtLimit 
+          isAtLimit || fileError
             ? 'border-red-400 dark:border-red-600' 
             : 'border-[var(--border-color)] focus-within:border-blue-400 dark:focus-within:border-blue-600'
         }`}>
           {/* Attachment button */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={isProcessing}
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.odt,.ods,.png,.jpg,.jpeg,.gif,.webp,.bmp,.zip,.7z,.rar"
+          />
           <button
-            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0 self-end mb-0.5"
-            title="Anexar arquivo (em breve)"
-            disabled
+            type="button"
+            className={`p-1.5 transition-colors flex-shrink-0 self-end mb-0.5 ${
+              selectedFile
+                ? 'text-blue-600'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+            } disabled:opacity-50`}
+            title={`Anexar arquivo (máx. ${formatFileSize(MAX_UPLOAD_BYTES)})`}
+            disabled={isProcessing}
+            onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip size={17} />
           </button>
@@ -108,7 +215,11 @@ export function ChatInput() {
             value={input}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Faça uma consulta sobre documentos corporativos..."
+            placeholder={
+              selectedFile
+                ? 'Informe a pasta do OneDrive, ex.: Envie para a pasta /RH/Uploads'
+                : 'Faça uma consulta ou arraste um arquivo para o chat...'
+            }
             disabled={isProcessing}
             rows={1}
             className="flex-1 bg-transparent resize-none outline-none text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] min-h-[24px] max-h-[200px] leading-6 py-0.5 disabled:opacity-50"
@@ -142,7 +253,7 @@ export function ChatInput() {
               <Lock size={9} />
               Dados protegidos por LGPD
             </span>
-            <span>Enter para enviar • Shift+Enter para nova linha</span>
+            <span>Enter para enviar • Arraste arquivos (máx. {formatFileSize(MAX_UPLOAD_BYTES)})</span>
           </div>
 
           {/* Character count */}
@@ -156,10 +267,10 @@ export function ChatInput() {
         </div>
 
         {/* Warning message */}
-        {isAtLimit && (
+        {(isAtLimit || fileError) && (
           <div className="flex items-center gap-1.5 mt-1 px-1 text-xs text-red-500">
             <AlertCircle size={12} />
-            <span>Limite de caracteres atingido</span>
+            <span>{fileError || 'Limite de caracteres atingido'}</span>
           </div>
         )}
 
@@ -167,7 +278,11 @@ export function ChatInput() {
         {isProcessing && (
           <div className="mt-2 px-1 flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
             <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            <span>Consultando OneDrive e SharePoint...</span>
+            <span>
+              {sendingUpload
+                ? 'Enviando arquivo para o OneDrive...'
+                : 'Consultando OneDrive e SharePoint...'}
+            </span>
           </div>
         )}
 

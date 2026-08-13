@@ -5,8 +5,9 @@ import { Avatar } from '../ui/Avatar'
 import { useApp } from '../../contexts/AppContext'
 import { 
   Copy, ThumbsUp, ThumbsDown, ExternalLink, 
-  FileText, Calendar, AlertTriangle, CheckCircle, X
+  FileText, Calendar, AlertTriangle, CheckCircle, X, Paperclip
 } from 'lucide-react'
+import { formatFileSize } from '../../utils/uploadHelpers'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { isSecureUrl } from '../../utils/security'
@@ -45,6 +46,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div className="flex items-end justify-end gap-2 animate-fade-in">
         <div className="max-w-[80%]">
           <div className="message-user">
+            {message.attachment && (
+              <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/20">
+                <Paperclip size={13} className="flex-shrink-0 opacity-90" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{message.attachment.name}</p>
+                  <p className="text-[10px] opacity-80">
+                    {formatFileSize(message.attachment.size)}
+                  </p>
+                </div>
+              </div>
+            )}
             <p className="text-sm leading-relaxed">{message.content}</p>
           </div>
           <p className="text-[10px] text-[var(--text-muted)] text-right mt-1 pr-1">

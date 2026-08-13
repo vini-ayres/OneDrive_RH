@@ -31,7 +31,9 @@ export default {
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-in-out',
-        'slide-in': 'slideIn 0.3s ease-out',
+        'slide-in': 'slideIn 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
+        'page-enter': 'pageEnter 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
+        'nav-item-enter': 'navItemEnter 0.3s cubic-bezier(0.32, 0.72, 0, 1) backwards',
         'pulse-dot': 'pulseDot 1.4s infinite ease-in-out',
         'typing': 'typing 1.5s infinite',
       },
@@ -43,6 +45,14 @@ export default {
         slideIn: {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(0)' },
+        },
+        pageEnter: {
+          '0%': { opacity: '0', transform: 'translateX(16px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        navItemEnter: {
+          '0%': { opacity: '0', transform: 'translateX(-8px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
         },
         pulseDot: {
           '0%, 80%, 100%': { transform: 'scale(0)', opacity: '0.5' },

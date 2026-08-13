@@ -5,9 +5,15 @@ import path from 'path'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
-  const chatWebhook = env.VITE_N8N_CHAT_WEBHOOK_URL || env.VITE_N8N_BASE_URL || 'https://webhookhml.abainfra.com.br/webhook/one-drive-tst'
+  const chatWebhook = env.VITE_N8N_CHAT_WEBHOOK_URL || env.VITE_N8N_BASE_URL || 'https://webhook.abainfra.com.br/webhook/one-drive-tst'
   const parsedWebhook = new URL(chatWebhook)
   const webhookPath = parsedWebhook.pathname.replace(/\/+$/, '') || '/'
+
+  const uploadWebhook =
+    env.VITE_N8N_UPLOAD_WEBHOOK_URL ||
+    `${parsedWebhook.origin}/webhook/upload-onedrive`
+  const parsedUploadWebhook = new URL(uploadWebhook)
+  const uploadWebhookPath = parsedUploadWebhook.pathname.replace(/\/+$/, '') || '/'
 
   const authApiUrl = env.VITE_AUTH_API_URL || 'http://localhost:8080/api/auth'
   const parsedAuth = new URL(authApiUrl)
@@ -42,6 +48,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: () => webhookPath,
+        },
+        '/api/n8n/upload': {
+          target: parsedUploadWebhook.origin,
+          changeOrigin: true,
+          secure: true,
+          rewrite: () => uploadWebhookPath,
         },
         '/api/auth': {
           target: parsedAuth.origin,

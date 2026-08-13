@@ -36,6 +36,14 @@ export interface UserProfile {
   lastActivity: Date
 }
 
+/** Metadados de anexo exibidos na mensagem do chat */
+export interface ChatAttachment {
+  name: string
+  size: number
+  type: string
+  folderPath?: string
+}
+
 // Mensagem do chat
 export interface ChatMessage {
   id: string
@@ -45,6 +53,41 @@ export interface ChatMessage {
   sources?: DocumentSource[]
   status: 'sending' | 'sent' | 'error' | 'blocked'
   processingSteps?: ProcessingStep[]
+  attachment?: ChatAttachment
+}
+
+/** Payload para upload de arquivo no OneDrive via n8n */
+export interface UploadPayload {
+  query: string
+  folderPath: string
+  file: File
+  userId: string
+  userName: string
+  userEmail: string
+  userGroups: string[]
+  userRoles: UserRole[]
+  conversationId?: string
+  accessToken: string
+  metadata: {
+    ipAddress: string
+    userAgent: string
+    sessionId: string
+    timestamp: string
+  }
+}
+
+export interface UploadApiResponse {
+  success: boolean
+  message?: string
+  answer?: string
+  file?: {
+    id?: string
+    name?: string
+    webUrl?: string
+    path?: string
+    size?: number
+  }
+  requestId?: string
 }
 
 // Fonte de documento citada na resposta

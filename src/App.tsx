@@ -10,11 +10,13 @@ import { Header } from './components/layout/Header'
 import { Sidebar } from './components/layout/Sidebar'
 import { SessionWarning } from './components/layout/SessionWarning'
 import { useAuth } from './hooks/useAuth'
+import { useConversationHydration } from './hooks/useConversationHydration'
 import { Loader2, Shield } from 'lucide-react'
 
 function AppContent() {
   const { state, dispatch } = useApp()
   const { isLoading, isAuthenticated } = useAuth()
+  useConversationHydration()
 
   if (isLoading) {
     return (

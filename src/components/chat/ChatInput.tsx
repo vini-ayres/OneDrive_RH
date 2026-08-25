@@ -142,7 +142,11 @@ export function ChatInput({ pendingFile = null, onPendingFileHandled }: ChatInpu
   return (
     <div className="border-t border-[var(--border-color)] bg-[var(--bg-primary)] p-4">
       {/* Examples - shown when no messages */}
-      {state.currentConversation?.messages.length === 0 || !state.currentConversation ? (
+      {(!state.currentConversation || (
+        state.currentConversation.messages.length === 0 &&
+        !state.conversationLoadingId &&
+        !state.conversationLoadError
+      )) ? (
         <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-3xl mx-auto">
           {EXAMPLE_QUERIES.slice(0, 4).map((query, i) => (
             <button

@@ -5,9 +5,12 @@ import { sanitizeChatQuery, sanitizeApiResponse, generateSessionId } from '../ut
 import { checkQueryPermission } from '../utils/rbac'
 import { extractFolderPathFromPrompt, validateUploadFile } from '../utils/uploadHelpers'
 import { ChatMessage, ProcessingStep, DocumentSource } from '../types'
+import { NEW_CONVERSATION_TITLE } from '../utils/conversation'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function useChat() {
   const { state, dispatch, sessionId, newConversation } = useApp()
+  const queryClient = useQueryClient()
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([])
 
@@ -312,7 +315,7 @@ export function useChat() {
       }
 
       // Atualizar título apenas na primeira mensagem (evita sobrescrever mensagens com snapshot stale)
-      if (conversation.title === 'Nova Conversa') {
+      if (conversation.title === NEW_CONVERSATION_TITLE || conversation.title === 'Nova Conversa') {
         const titleBase = file ? `Upload: ${file.name}` : safe
         const title = titleBase.length > 50 ? titleBase.substring(0, 50) + '...' : titleBase
         dispatch({
@@ -328,6 +331,9 @@ export function useChat() {
           }
         })
       }
+
+      void queryClient.invalidateQueries({ queryKey: ['conversations', user.id] })
+      void queryClient.invalidateQueries({ queryKey: ['recent-documents'] })
 
     } catch (error: unknown) {
       if (file) {
@@ -380,7 +386,7 @@ export function useChat() {
       setIsProcessing(false)
       setProcessingSteps([])
     }
-  }, [state, isProcessing, dispatch, sessionId, newConversation, updateStep])
+  }, [state, isProcessing, dispatch, sessionId, newConversation, updateStep, queryClient])
 
   return {
     sendMessage,
@@ -395,7 +401,7 @@ export function useChat() {
 function sanitizeSources(sources: DocumentSource[]): DocumentSource[] {
   return sources.map(source => ({
     ...source,
-    id: '', // Nunca expor IDs internos
-    path: source.path.replace(/\/drives\/[^/]+\/items\/[^/]+/g, ''), // Remover paths técnicos
+    id: source.id || source.webUrl || source.name || '',
+    path: source.path.replace(/\/drives\/[^/]+\/items\/[^/]+/g, ''),
   }))
 }

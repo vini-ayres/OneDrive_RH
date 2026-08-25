@@ -12,6 +12,8 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { isSecureUrl } from '../../utils/security'
 import { formatChatMarkdown } from '../../utils/chatMarkdown'
+import { recordDocumentAccess } from '../../services/apiService'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface MessageBubbleProps {
   message: ChatMessage
@@ -20,6 +22,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   const { state } = useApp()
   const { user } = state
+  const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null)
 
@@ -36,6 +39,25 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   const formatTimestamp = (date: Date) => {
     return format(date, "HH:mm 'às' dd/MM/yyyy", { locale: ptBR })
+  }
+
+  const handleDocumentOpen = (source: NonNullable<ChatMessage['sources']>[0]) => {
+    if (!user) return
+    const documentId = source.id || source.webUrl || source.name
+    if (!documentId) return
+    recordDocumentAccess(user, documentId, {
+      name: source.name,
+      path: source.path,
+      webUrl: source.webUrl,
+      docType: source.type,
+      source: 'chat_source',
+    })
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ['recent-documents'] })
+      })
+      .catch(() => {
+        // Falha silenciosa — não bloqueia abertura do link
+      })
   }
 
   // Formatar conteúdo markdown retornado pelo n8n (links, listas, negrito, etc.)
@@ -148,7 +170,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                       rel="noopener noreferrer"
                       className="text-blue-500 hover:text-blue-700 flex-shrink-0"
                       title="Abrir documento"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDocumentOpen(source)
+                      }}
                     >
                       <ExternalLink size={13} />
                     </a>

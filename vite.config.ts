@@ -19,6 +19,19 @@ export default defineConfig(({ mode }) => {
   const parsedAuth = new URL(authApiUrl)
   const authPathPrefix = parsedAuth.pathname.replace(/\/+$/, '') || '/api/auth'
 
+  const dataApiUrl = env.VITE_DATA_API_URL || 'http://localhost:8787/api'
+  const dataApiIsRelative = dataApiUrl.startsWith('/')
+  const parsedDataApi = dataApiIsRelative
+    ? null
+    : new URL(dataApiUrl)
+  const dataApiTarget = dataApiIsRelative
+    ? (env.VITE_DATA_API_TARGET || 'http://127.0.0.1:8787')
+    : parsedDataApi!.origin
+  // O frontend chama `/api/data/*`; a API Hono expõe as rotas em `/api/*`.
+  const backendApiPath = dataApiIsRelative
+    ? '/api'
+    : (parsedDataApi!.pathname.replace(/\/+$/, '') || '/api')
+
   return {
     plugins: [react()],
     resolve: {
@@ -60,6 +73,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/api\/auth/, authPathPrefix),
+        },
+        '/api/data': {
+          target: dataApiTarget,
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/api\/data/, backendApiPath),
         },
       },
     },

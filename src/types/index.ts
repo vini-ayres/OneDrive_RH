@@ -249,6 +249,9 @@ export interface AppState {
   sidebarOpen: boolean
   activeView: 'chat' | 'audit' | 'dashboard' | 'settings' | 'documents'
   sessionExpiresAt: Date | null
+  conversationLoadingId: string | null
+  conversationLoadError: string | null
+  conversationReloadAt: number
 }
 
 // Grupos do Active Directory mapeados para roles

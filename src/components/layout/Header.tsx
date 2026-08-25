@@ -1,13 +1,12 @@
 import React, { useState } from 'react'
-import { 
-  Menu, Bell, Sun, Moon, LogOut, User, 
-  Shield, Clock, ChevronDown, Settings
+import {
+  Menu, Sun, Moon, LogOut, User,
+  Shield, ChevronDown, Settings
 } from 'lucide-react'
 import { useApp } from '../../contexts/AppContext'
 import { useAuth } from '../../hooks/useAuth'
 import { Avatar } from '../ui/Avatar'
 import { RoleBadge } from '../ui/Badge'
-import { SESSION_TIMEOUT_MINUTES } from '../../contexts/AppContext'
 import { getHighestRole } from '../../utils/rbac'
 
 export function Header() {
@@ -15,7 +14,7 @@ export function Header() {
   const { logout } = useAuth()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
 
-  const { user, theme, sidebarOpen, sessionExpiresAt } = state
+  const { user, theme, sidebarOpen } = state
 
   const toggleTheme = () => {
     dispatch({ type: 'SET_THEME', payload: theme === 'light' ? 'dark' : 'light' })
@@ -23,23 +22,6 @@ export function Header() {
 
   const toggleSidebar = () => {
     dispatch({ type: 'SET_SIDEBAR', payload: !sidebarOpen })
-  }
-
-  // Calcular tempo restante de sessão
-  const getSessionTimeRemaining = (): string => {
-    if (!sessionExpiresAt) return `${SESSION_TIMEOUT_MINUTES}m`
-    const remaining = Math.max(0, Math.floor((sessionExpiresAt.getTime() - Date.now()) / 60000))
-    if (remaining <= 0) return 'Expirada'
-    if (remaining < 5) return `${remaining}m ⚠️`
-    return `${remaining}m`
-  }
-
-  const sessionTimeClass = () => {
-    if (!sessionExpiresAt) return 'text-green-600 dark:text-green-400'
-    const remaining = Math.floor((sessionExpiresAt.getTime() - Date.now()) / 60000)
-    if (remaining < 5) return 'text-red-500 animate-pulse'
-    if (remaining < 10) return 'text-yellow-500'
-    return 'text-green-600 dark:text-green-400'
   }
 
   const highestRole = user ? getHighestRole(user.roles) : null
@@ -80,14 +62,6 @@ export function Header() {
 
       {/* Right: Actions + Profile */}
       <div className="flex items-center gap-2">
-        {/* Timer de sessão */}
-        {user && (
-          <div className={`hidden sm:flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md bg-[var(--bg-tertiary)] ${sessionTimeClass()}`}>
-            <Clock size={12} />
-            <span>{getSessionTimeRemaining()}</span>
-          </div>
-        )}
-
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}
@@ -95,12 +69,6 @@ export function Header() {
           aria-label="Alternar tema"
         >
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-        </button>
-
-        {/* Notifications */}
-        <button className="btn-ghost p-2 relative" aria-label="Notificações">
-          <Bell size={18} />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
         </button>
 
         {/* Profile dropdown */}

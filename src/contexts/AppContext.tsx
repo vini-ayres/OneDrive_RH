@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef } from 'react'
 import { AppState, UserProfile, Conversation, ChatMessage } from '../types'
 import { generateSessionId } from '../utils/security'
+import { isEmptyDraftConversation, NEW_CONVERSATION_TITLE } from '../utils/conversation'
+import {
+  clearPersistedSession,
+  loadLastConversationId,
+  loadPersistedSession,
+  saveLastConversationId,
+  savePersistedSession,
+} from '../utils/sessionPersistence'
 
 type AppAction =
   | { type: 'SET_USER'; payload: UserProfile | null }
@@ -9,34 +17,42 @@ type AppAction =
   | { type: 'SET_SIDEBAR'; payload: boolean }
   | { type: 'SET_VIEW'; payload: AppState['activeView'] }
   | { type: 'SET_CONVERSATION'; payload: Conversation | null }
+  | { type: 'SET_CONVERSATIONS'; payload: Conversation[] }
   | { type: 'ADD_CONVERSATION'; payload: Conversation }
   | { type: 'UPDATE_CONVERSATION'; payload: Conversation }
   | { type: 'DELETE_CONVERSATION'; payload: string }
   | { type: 'ADD_MESSAGE'; payload: { conversationId: string; message: ChatMessage } }
   | { type: 'UPDATE_MESSAGE'; payload: { conversationId: string; messageId: string; updates: Partial<ChatMessage> } }
   | { type: 'SET_SESSION_EXPIRES'; payload: Date | null }
+  | { type: 'SET_CONVERSATION_STATUS'; payload: { loadingId: string | null; error: string | null } }
+  | { type: 'RELOAD_CONVERSATION' }
   | { type: 'UPDATE_ACTIVITY' }
   | { type: 'LOGOUT' }
 
 const SESSION_TIMEOUT_MINUTES = 30
 const SESSION_ID = generateSessionId()
 
+const persistedSession = loadPersistedSession()
+
 const initialState: AppState = {
-  user: null,
-  isAuthenticated: false,
+  user: persistedSession?.user ?? null,
+  isAuthenticated: Boolean(persistedSession?.user),
   isLoading: true,
   currentConversation: null,
   conversations: [],
   theme: (localStorage.getItem('theme') as 'light' | 'dark') || 'light',
   sidebarOpen: true,
   activeView: 'chat',
-  sessionExpiresAt: null,
+  sessionExpiresAt: persistedSession?.sessionExpiresAt ?? null,
+  conversationLoadingId: null,
+  conversationLoadError: null,
+  conversationReloadAt: 0,
 }
 
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case 'SET_USER':
-      return {
+    case 'SET_USER': {
+      const next = {
         ...state,
         user: action.payload,
         isAuthenticated: !!action.payload,
@@ -45,6 +61,13 @@ function appReducer(state: AppState, action: AppAction): AppState {
           ? new Date(Date.now() + SESSION_TIMEOUT_MINUTES * 60 * 1000)
           : null,
       }
+      if (next.user && next.sessionExpiresAt) {
+        savePersistedSession(next.user, next.sessionExpiresAt)
+      } else {
+        clearPersistedSession()
+      }
+      return next
+    }
 
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload }
@@ -64,32 +87,103 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_VIEW':
       return { ...state, activeView: action.payload }
 
-    case 'SET_CONVERSATION':
-      return { ...state, currentConversation: action.payload }
-
-    case 'ADD_CONVERSATION':
+    case 'SET_CONVERSATION': {
+      const next = action.payload
+      const conversations = state.conversations.filter(
+        c => c.id === next?.id || !isEmptyDraftConversation(c)
+      )
+      saveLastConversationId(next?.id ?? null)
       return {
         ...state,
-        conversations: [action.payload, ...state.conversations],
+        currentConversation: next
+          ? conversations.find(c => c.id === next.id) || next
+          : null,
+        conversations,
+        conversationLoadError: next?.id === state.currentConversation?.id
+          ? state.conversationLoadError
+          : null,
+      }
+    }
+
+    case 'SET_CONVERSATION_STATUS':
+      return {
+        ...state,
+        conversationLoadingId: action.payload.loadingId,
+        conversationLoadError: action.payload.error,
+      }
+
+    case 'RELOAD_CONVERSATION':
+      return {
+        ...state,
+        conversationReloadAt: Date.now(),
+        conversationLoadError: null,
+      }
+
+    case 'SET_CONVERSATIONS': {
+      const existingById = new Map(state.conversations.map(c => [c.id, c]))
+      const fromServer = action.payload.map(incoming => {
+        const existing = existingById.get(incoming.id)
+        if (existing && existing.messages.length > 0) {
+          return {
+            ...incoming,
+            messages: existing.messages,
+            createdAt: existing.createdAt || incoming.createdAt,
+          }
+        }
+        return incoming
+      })
+      const incomingIds = new Set(action.payload.map(c => c.id))
+      const localOnly = state.conversations.filter(
+        c => !incomingIds.has(c.id) && (c.messages.length > 0 || c.id === state.currentConversation?.id)
+      )
+      const merged = [...localOnly, ...fromServer].sort(
+        (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()
+      )
+      const lastId = state.currentConversation?.id || loadLastConversationId()
+      const currentConversation = lastId
+        ? merged.find(c => c.id === lastId) || state.currentConversation
+        : null
+      if (currentConversation?.id) {
+        saveLastConversationId(currentConversation.id)
+      }
+      return {
+        ...state,
+        conversations: merged,
+        currentConversation,
+      }
+    }
+
+    case 'ADD_CONVERSATION':
+      saveLastConversationId(action.payload.id)
+      return {
+        ...state,
+        conversations: [
+          action.payload,
+          ...state.conversations.filter(c => !isEmptyDraftConversation(c)),
+        ],
         currentConversation: action.payload,
+        conversationLoadingId: null,
+        conversationLoadError: null,
       }
 
     case 'UPDATE_CONVERSATION': {
-      const updated = state.conversations.map(c => {
-        if (c.id !== action.payload.id) return c
+      const exists = state.conversations.some(c => c.id === action.payload.id)
+      const updated = exists
+        ? state.conversations.map(c => {
+            if (c.id !== action.payload.id) return c
 
-        return {
-          ...c,
-          ...action.payload,
-          // Nunca perder mensagens já renderizadas quando o update vier com um objeto parcial
-          messages: action.payload.messages.length > 0 ? action.payload.messages : c.messages,
-          createdAt: action.payload.createdAt || c.createdAt,
-          updatedAt: action.payload.updatedAt || c.updatedAt,
-        }
-      })
+            return {
+              ...c,
+              ...action.payload,
+              messages: action.payload.messages.length > 0 ? action.payload.messages : c.messages,
+              createdAt: action.payload.createdAt || c.createdAt,
+              updatedAt: action.payload.updatedAt || c.updatedAt,
+            }
+          })
+        : [action.payload, ...state.conversations]
       const currentConversation =
         state.currentConversation?.id === action.payload.id
-          ? updated.find(c => c.id === action.payload.id) || state.currentConversation
+          ? updated.find(c => c.id === action.payload.id) || action.payload
           : state.currentConversation
 
       return {
@@ -101,13 +195,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
     case 'DELETE_CONVERSATION': {
       const filtered = state.conversations.filter(c => c.id !== action.payload)
+      const currentConversation =
+        state.currentConversation?.id === action.payload
+          ? null
+          : state.currentConversation
+      saveLastConversationId(currentConversation?.id ?? null)
       return {
         ...state,
         conversations: filtered,
-        currentConversation:
-          state.currentConversation?.id === action.payload
-            ? filtered[0] || null
-            : state.currentConversation,
+        currentConversation,
       }
     }
 
@@ -143,20 +239,34 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_SESSION_EXPIRES':
       return { ...state, sessionExpiresAt: action.payload }
 
-    case 'UPDATE_ACTIVITY':
+    case 'UPDATE_ACTIVITY': {
+      const sessionExpiresAt = new Date(Date.now() + SESSION_TIMEOUT_MINUTES * 60 * 1000)
+      const user = state.user
+        ? { ...state.user, lastActivity: new Date() }
+        : null
+      if (user) {
+        savePersistedSession(user, sessionExpiresAt)
+      }
       return {
         ...state,
-        sessionExpiresAt: new Date(Date.now() + SESSION_TIMEOUT_MINUTES * 60 * 1000),
-        user: state.user
-          ? { ...state.user, lastActivity: new Date() }
-          : null,
+        sessionExpiresAt,
+        user,
       }
+    }
 
     case 'LOGOUT':
+      clearPersistedSession()
       return {
         ...initialState,
+        user: null,
+        isAuthenticated: false,
         theme: state.theme,
         isLoading: false,
+        conversationLoadingId: null,
+        conversationLoadError: null,
+        currentConversation: null,
+        conversations: [],
+        sessionExpiresAt: null,
       }
 
     default:
@@ -224,7 +334,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const newConversation = useCallback((): Conversation => {
     const conv: Conversation = {
       id: generateSessionId(),
-      title: 'Nova Conversa',
+      title: NEW_CONVERSATION_TITLE,
       messages: [],
       createdAt: new Date(),
       updatedAt: new Date(),

@@ -1,66 +1,15 @@
 import React, { useState, useMemo } from 'react'
 import {
-  Shield, Search, Filter, Download, RefreshCw,
-  CheckCircle, XCircle, AlertTriangle, Clock,
-  User, FileText, Calendar, ChevronDown, ChevronUp
+  Shield, Search, Filter, FilterX, Download, RefreshCw,
+  CheckCircle, XCircle, AlertTriangle,
+  FileText, Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2
 } from 'lucide-react'
-import { format, subDays } from 'date-fns'
+import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { AuditLog, UserRole } from '../types'
+import { AuditLog } from '../types'
 import { Badge } from '../components/ui/Badge'
 import { getRoleLabel } from '../utils/rbac'
-
-// Mock data para demonstração
-const generateMockLogs = (): AuditLog[] => {
-  const names = ['Ana Santos', 'Carlos Lima', 'Maria Oliveira', 'João Costa', 'Paula Ferreira', 'Roberto Silva']
-  const roles: UserRole[] = ['rh', 'gestor', 'colaborador', 'diretoria']
-  const queries = [
-    'Localize o contrato de trabalho',
-    'Mostre os holerites de janeiro',
-    'Resuma o regulamento interno',
-    'Liste documentos admissionais',
-    'Buscar arquivos da pasta RH',
-    'Contrato de prestação de serviços',
-    'Documentos de rescisão',
-    'Política de benefícios',
-  ]
-  const results = ['success', 'blocked', 'denied', 'error'] as const
-  const documents = [
-    'Regulamento_Interno_2024.pdf',
-    'Contrato_Trabalho_Template.docx',
-    'Politica_RH_v3.pdf',
-    'Holerite_Template.xlsx',
-    '',
-  ]
-
-  return Array.from({ length: 50 }, (_, i) => {
-    const name = names[Math.floor(Math.random() * names.length)]
-    const role = roles[Math.floor(Math.random() * roles.length)]
-    const result = results[Math.random() > 0.8 ? (Math.random() > 0.5 ? 1 : 2) : 0]
-    const doc = documents[Math.floor(Math.random() * documents.length)]
-    const daysAgo = Math.floor(Math.random() * 30)
-    const hoursAgo = Math.floor(Math.random() * 23)
-    const ts = subDays(new Date(), daysAgo)
-    ts.setHours(hoursAgo)
-
-    return {
-      id: `audit-${i}`,
-      userId: `user-${i % 6}`,
-      userName: name,
-      userEmail: `${name.toLowerCase().replace(' ', '.')}@empresa.com.br`,
-      action: 'chat_query',
-      query: queries[Math.floor(Math.random() * queries.length)],
-      documentAccessed: doc || undefined,
-      documentPath: doc ? `/RH/Documentos/${doc}` : undefined,
-      result,
-      ipAddress: `10.0.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      timestamp: ts,
-      sessionId: `sess-${Math.random().toString(36).substr(2, 8)}`,
-      role,
-    }
-  }).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-}
+import { useAuditLogs } from '../hooks/useDataApi'
 
 const RESULT_ICONS = {
   success: <CheckCircle size={14} className="text-green-500" />,
@@ -84,7 +33,6 @@ const RESULT_VARIANTS: Record<string, 'green' | 'yellow' | 'red' | 'default'> = 
 }
 
 export function AuditPage() {
-  const [logs] = useState<AuditLog[]>(generateMockLogs())
   const [searchQuery, setSearchQuery] = useState('')
   const [filterResult, setFilterResult] = useState('all')
   const [filterUser, setFilterUser] = useState('')
@@ -96,23 +44,20 @@ export function AuditPage() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const PAGE_SIZE = 15
 
+  const apiFilters = useMemo(() => ({
+    startDate: filterDateFrom ? new Date(filterDateFrom) : undefined,
+    endDate: filterDateTo ? new Date(filterDateTo) : undefined,
+    result: filterResult !== 'all' ? filterResult : undefined,
+    documentName: searchQuery || undefined,
+  }), [filterDateFrom, filterDateTo, filterResult, searchQuery])
+
+  const { data, isLoading, refetch, isFetching } = useAuditLogs(apiFilters, currentPage, PAGE_SIZE)
+  const logs = data?.logs ?? []
+  const totalFromApi = data?.total ?? 0
+
   // Filtrar e ordenar logs
   const filteredLogs = useMemo(() => {
     let result = [...logs]
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(log =>
-        log.userName.toLowerCase().includes(q) ||
-        log.query.toLowerCase().includes(q) ||
-        log.userEmail.toLowerCase().includes(q) ||
-        (log.documentAccessed?.toLowerCase().includes(q) ?? false)
-      )
-    }
-
-    if (filterResult !== 'all') {
-      result = result.filter(log => log.result === filterResult)
-    }
 
     if (filterUser) {
       result = result.filter(log =>
@@ -120,18 +65,6 @@ export function AuditPage() {
       )
     }
 
-    if (filterDateFrom) {
-      const from = new Date(filterDateFrom)
-      result = result.filter(log => log.timestamp >= from)
-    }
-
-    if (filterDateTo) {
-      const to = new Date(filterDateTo)
-      to.setHours(23, 59, 59)
-      result = result.filter(log => log.timestamp <= to)
-    }
-
-    // Ordenar
     result.sort((a, b) => {
       const aVal = a[sortField]
       const bVal = b[sortField]
@@ -147,10 +80,21 @@ export function AuditPage() {
     })
 
     return result
-  }, [logs, searchQuery, filterResult, filterUser, filterDateFrom, filterDateTo, sortField, sortDir])
+  }, [logs, filterUser, sortField, sortDir])
 
-  const totalPages = Math.ceil(filteredLogs.length / PAGE_SIZE)
-  const paginatedLogs = filteredLogs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(totalFromApi / PAGE_SIZE))
+  const paginatedLogs = filteredLogs
+  const pageFrom = totalFromApi === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1
+  const pageTo = Math.min(currentPage * PAGE_SIZE, totalFromApi)
+
+  const pageNumbers = useMemo(() => {
+    const windowSize = Math.min(5, totalPages)
+    const half = Math.floor(windowSize / 2)
+    let start = Math.max(1, currentPage - half)
+    const end = Math.min(totalPages, start + windowSize - 1)
+    start = Math.max(1, end - windowSize + 1)
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+  }, [currentPage, totalPages])
 
   const handleSort = (field: keyof AuditLog) => {
     if (sortField === field) {
@@ -193,10 +137,18 @@ export function AuditPage() {
 
   // Stats rápidas
   const stats = {
-    total: filteredLogs.length,
+    total: totalFromApi,
     success: filteredLogs.filter(l => l.result === 'success').length,
     blocked: filteredLogs.filter(l => l.result === 'blocked').length,
     denied: filteredLogs.filter(l => l.result === 'denied').length,
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 size={24} className="animate-spin text-blue-600" />
+      </div>
+    )
   }
 
   return (
@@ -221,8 +173,12 @@ export function AuditPage() {
               <Download size={13} />
               Exportar CSV
             </button>
-            <button className="btn-primary text-xs px-3 py-2">
-              <RefreshCw size={13} />
+            <button
+              onClick={() => refetch()}
+              className={`btn-primary text-xs px-3 py-2 ${isFetching ? 'opacity-70' : ''}`}
+              disabled={isFetching}
+            >
+              <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
               Atualizar
             </button>
           </div>
@@ -274,21 +230,21 @@ export function AuditPage() {
             <Filter size={14} className="text-[var(--text-muted)]" />
             <span className="text-sm font-medium text-[var(--text-secondary)]">Filtros</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_minmax(0,1.4fr)] gap-3 items-end">
+            <div className="relative min-w-0">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
               <input
                 type="text"
                 placeholder="Buscar por nome, consulta..."
                 value={searchQuery}
                 onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
-                className="input-field pl-8 text-sm"
+                className="input-field pl-8 text-sm h-10"
               />
             </div>
             <select
               value={filterResult}
               onChange={e => { setFilterResult(e.target.value); setCurrentPage(1) }}
-              className="input-field text-sm"
+              className="input-field text-sm h-10 min-w-0"
             >
               <option value="all">Todos os resultados</option>
               <option value="success">✅ Sucesso</option>
@@ -296,34 +252,36 @@ export function AuditPage() {
               <option value="denied">❌ Negado</option>
               <option value="error">🔴 Erro</option>
             </select>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5 min-w-0 sm:col-span-2 xl:col-span-1">
               <input
                 type="date"
                 value={filterDateFrom}
                 onChange={e => { setFilterDateFrom(e.target.value); setCurrentPage(1) }}
-                className="input-field text-sm flex-1"
+                className="input-field text-sm flex-1 min-w-0 h-10"
               />
-              <span className="text-[var(--text-muted)] text-xs">até</span>
+              <span className="text-[var(--text-muted)] text-xs shrink-0">até</span>
               <input
                 type="date"
                 value={filterDateTo}
                 onChange={e => { setFilterDateTo(e.target.value); setCurrentPage(1) }}
-                className="input-field text-sm flex-1"
+                className="input-field text-sm flex-1 min-w-0 h-10"
               />
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('')
+                  setFilterResult('all')
+                  setFilterUser('')
+                  setFilterDateFrom('')
+                  setFilterDateTo('')
+                  setCurrentPage(1)
+                }}
+                className="btn-secondary text-[11px] px-2 py-0 h-8 w-auto shrink-0 border border-[var(--border-color)] whitespace-nowrap"
+              >
+                <FilterX size={12} />
+                Limpar Filtros
+              </button>
             </div>
-            <button
-              onClick={() => {
-                setSearchQuery('')
-                setFilterResult('all')
-                setFilterUser('')
-                setFilterDateFrom('')
-                setFilterDateTo('')
-                setCurrentPage(1)
-              }}
-              className="btn-secondary text-sm"
-            >
-              Limpar Filtros
-            </button>
           </div>
         </div>
 
@@ -405,25 +363,25 @@ export function AuditPage() {
                     {expandedRow === log.id && (
                       <tr>
                         <td colSpan={6} className="px-4 py-3 bg-[var(--bg-tertiary)]">
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                            <div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-4 gap-y-3 text-xs">
+                            <div className="min-w-0">
                               <p className="font-medium text-[var(--text-muted)] mb-0.5">Email</p>
-                              <p className="text-[var(--text-secondary)]">{log.userEmail}</p>
+                              <p className="text-[var(--text-secondary)] break-all">{log.userEmail}</p>
                             </div>
-                            <div>
-                              <p className="font-medium text-[var(--text-muted)] mb-0.5">Session ID</p>
-                              <p className="text-[var(--text-secondary)] font-mono">{log.sessionId}</p>
-                            </div>
-                            <div>
+                            <div className="min-w-0">
                               <p className="font-medium text-[var(--text-muted)] mb-0.5">Data/Hora Completa</p>
-                              <p className="text-[var(--text-secondary)]">
+                              <p className="text-[var(--text-secondary)] whitespace-nowrap">
                                 {format(log.timestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR })}
                               </p>
                             </div>
+                            <div className="min-w-0 sm:col-span-2">
+                              <p className="font-medium text-[var(--text-muted)] mb-0.5">Session ID</p>
+                              <p className="text-[var(--text-secondary)] font-mono break-all">{log.sessionId}</p>
+                            </div>
                             {log.documentPath && (
-                              <div>
+                              <div className="min-w-0 sm:col-span-2 xl:col-span-4">
                                 <p className="font-medium text-[var(--text-muted)] mb-0.5">Caminho</p>
-                                <p className="text-[var(--text-secondary)] truncate">{log.documentPath}</p>
+                                <p className="text-[var(--text-secondary)] break-all">{log.documentPath}</p>
                               </div>
                             )}
                           </div>
@@ -446,43 +404,48 @@ export function AuditPage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-[var(--border-color)] flex items-center justify-between">
+          {totalFromApi > 0 && (
+            <div className="px-4 py-3 border-t border-[var(--border-color)] flex flex-col sm:flex-row items-center justify-between gap-3">
               <p className="text-xs text-[var(--text-muted)]">
-                Exibindo {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredLogs.length)} de {filteredLogs.length} registros
+                Exibindo {pageFrom}–{pageTo} de {totalFromApi} registros
               </p>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-2 py-1 text-xs rounded border border-[var(--border-color)] disabled:opacity-40 hover:bg-[var(--bg-tertiary)] transition-colors"
-                >
-                  Anterior
-                </button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  const page = Math.max(1, Math.min(currentPage - 2 + i, totalPages - 4 + i))
-                  return (
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="btn-secondary text-xs px-2.5 py-0 h-8 border border-[var(--border-color)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={14} />
+                    Anterior
+                  </button>
+                  {pageNumbers.map(page => (
                     <button
                       key={page}
+                      type="button"
                       onClick={() => setCurrentPage(page)}
-                      className={`w-7 h-7 text-xs rounded border transition-colors ${
+                      aria-current={currentPage === page ? 'page' : undefined}
+                      className={`w-8 h-8 text-xs font-medium rounded-lg border transition-colors ${
                         currentPage === page
                           ? 'bg-blue-600 text-white border-blue-600'
-                          : 'border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]'
+                          : 'border-[var(--border-color)] text-[var(--text-primary)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)]'
                       }`}
                     >
                       {page}
                     </button>
-                  )
-                })}
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-2 py-1 text-xs rounded border border-[var(--border-color)] disabled:opacity-40 hover:bg-[var(--bg-tertiary)] transition-colors"
-                >
-                  Próximo
-                </button>
-              </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="btn-secondary text-xs px-2.5 py-0 h-8 border border-[var(--border-color)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Próximo
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

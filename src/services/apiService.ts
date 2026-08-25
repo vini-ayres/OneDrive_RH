@@ -22,6 +22,7 @@ const N8N_UPLOAD_WEBHOOK_URL = (
   import.meta.env.VITE_N8N_UPLOAD_WEBHOOK_URL?.trim() ||
   resolveUploadWebhookUrl(N8N_BASE_URL)
 ).replace(/\/+$/, '')
+const DATA_API_URL = (import.meta.env.VITE_DATA_API_URL || '/api/data').replace(/\/+$/, '')
 
 // Timeout padrão de 60 segundos
 const DEFAULT_TIMEOUT = 60000
@@ -307,23 +308,6 @@ function createLocalDocumentResults(query: string): DocumentSource[] {
   return createMockSources(query)
 }
 
-function createLocalHistory() {
-  return {
-    conversations: [
-      {
-        id: 'local-conv-1',
-        title: 'Consulta de contrato',
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: 'local-conv-2',
-        title: 'Holerite e benefícios',
-        updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      },
-    ],
-  }
-}
-
 function readLocalAuditBuffer(): AuditLog[] {
   try {
     const existing = sessionStorage.getItem('audit_buffer')
@@ -400,13 +384,21 @@ function getUploadEndpoint(): string {
 
 function buildN8nChatPayload(payload: ChatPayload): string {
   const sessionId = payload.metadata?.sessionId || payload.conversationId || generateSessionId()
+  const requestId = generateSessionId()
 
   return JSON.stringify({
     query: payload.query,
     sessionId,
     session_id: sessionId,
     conversationId: payload.conversationId,
+    requestId,
     userId: payload.userId,
+    userName: payload.userName,
+    userEmail: payload.userEmail,
+    userGroups: payload.userGroups,
+    userRoles: payload.userRoles,
+    metadata: payload.metadata,
+    timestamp: payload.metadata.timestamp,
   })
 }
 
@@ -595,8 +587,8 @@ async function fetchWithRetry<T>(
       throw new Error('REQUEST_TIMEOUT')
     }
 
-    // Retry em erros de rede (não de autenticação)
-    if (retries > 0 && !['UNAUTHORIZED', 'FORBIDDEN', 'RATE_LIMITED'].includes(err.message)) {
+    // Retry em erros de rede (não 4xx, exceto rate limit já tratado acima)
+    if (retries > 0 && !['UNAUTHORIZED', 'FORBIDDEN', 'RATE_LIMITED'].includes(err.message) && !/^HTTP_ERROR_4/.test(err.message)) {
       await new Promise(resolve => setTimeout(resolve, 1000 * (3 - retries)))
       return fetchWithRetry<T>(url, options, retries - 1, timeoutMs)
     }
@@ -729,6 +721,7 @@ export async function uploadFileToOneDrive(
   payload: UploadPayload
 ): Promise<ApiResponse<UploadApiResponse>> {
   const sessionId = payload.metadata.sessionId || payload.conversationId || generateSessionId()
+  const requestId = generateSessionId()
   const mimeType = payload.file.type || 'application/octet-stream'
   const fileBase64 = await fileToBase64(payload.file)
 
@@ -745,6 +738,7 @@ export async function uploadFileToOneDrive(
     sessionId,
     session_id: sessionId,
     conversationId: payload.conversationId,
+    requestId,
     userId: payload.userId,
     userName: payload.userName,
     userEmail: payload.userEmail,
@@ -818,18 +812,144 @@ export async function searchDocuments(
  */
 export async function getConversationHistory(
   user: UserProfile
-): Promise<ApiResponse<{ conversations: Array<{ id: string; title: string; updatedAt: string }> }>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    return createApiResponse(createLocalHistory())
-  }
-
+): Promise<ApiResponse<{ conversations: Array<{ id: string; title: string; updatedAt: string; isFavorite?: boolean; createdAt?: string }> }>> {
   return fetchWithRetry(
-    `${N8N_BASE_URL}/history?userId=${encodeURIComponent(user.id)}`,
+    `${DATA_API_URL}/history?userId=${encodeURIComponent(user.id)}`,
     {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${user.accessToken}`,
+        Authorization: `Bearer ${user.accessToken}`,
       },
+    }
+  )
+}
+
+/**
+ * Carrega mensagens de uma conversa
+ */
+export async function getConversationMessages(
+  user: UserProfile,
+  conversationId: string
+): Promise<ApiResponse<{
+  conversation: { id: string; title: string; isFavorite: boolean; userId: string; createdAt: string; updatedAt: string }
+  messages: Array<{
+    id: string
+    role: string
+    content: string
+    timestamp: string
+    status: string
+    sources?: DocumentSource[]
+    attachment?: { name: string; size: number; type: string; folderPath?: string }
+    blockedReason?: string
+  }>
+}>> {
+  try {
+    return await fetchWithRetry(
+      `${DATA_API_URL}/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${user.accessToken}` },
+      }
+    )
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'HTTP_ERROR_404') {
+      return {
+        success: false,
+        error: 'NOT_FOUND',
+        timestamp: new Date().toISOString(),
+      }
+    }
+    throw error
+  }
+}
+
+/**
+ * Atualiza conversa (título, favorito)
+ */
+export async function updateConversationApi(
+  user: UserProfile,
+  conversationId: string,
+  updates: { title?: string; isFavorite?: boolean }
+): Promise<ApiResponse<{ id: string; title: string; isFavorite: boolean; updatedAt: string }>> {
+  return fetchWithRetry(
+    `${DATA_API_URL}/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${user.accessToken}` },
+      body: JSON.stringify(updates),
+    }
+  )
+}
+
+/**
+ * Exclui conversa
+ */
+export async function deleteConversationApi(
+  user: UserProfile,
+  conversationId: string
+): Promise<ApiResponse<{ deleted: boolean }>> {
+  return fetchWithRetry(
+    `${DATA_API_URL}/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${user.accessToken}` },
+    }
+  )
+}
+
+/**
+ * Obtém documentos recentes
+ */
+export async function getRecentDocuments(
+  user: UserProfile,
+  limit = 50
+): Promise<ApiResponse<{ documents: Array<{ id: string; name: string; type: string; folder: string; modifiedAt: string; webUrl: string; source?: string }> }>> {
+  if (isLocalTestAccessToken(user.accessToken)) {
+    try {
+      const response = await fetchWithRetry<{ documents: Array<{ id: string; name: string; type: string; folder: string; modifiedAt: string; webUrl: string }> }>(
+        `${DATA_API_URL}/documents/recent?limit=${limit}`,
+        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
+      )
+      if (response.success) return response
+    } catch {
+      // fallback below
+    }
+    return createApiResponse({
+      documents: createLocalDocumentResults('').map(d => ({
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        folder: d.path.split('/').slice(0, -1).join('/') || 'RH',
+        modifiedAt: d.modifiedAt.toISOString(),
+        webUrl: d.webUrl,
+      })),
+    })
+  }
+
+  return fetchWithRetry(
+    `${DATA_API_URL}/documents/recent?limit=${limit}`,
+    {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${user.accessToken}` },
+    }
+  )
+}
+
+/**
+ * Registra acesso a documento (clique em fonte)
+ */
+export async function recordDocumentAccess(
+  user: UserProfile,
+  documentId: string,
+  data: { name?: string; path?: string; webUrl?: string; docType?: string; source?: string }
+): Promise<ApiResponse<{ recorded: boolean }>> {
+  return fetchWithRetry(
+    `${DATA_API_URL}/documents/${encodeURIComponent(documentId)}/access`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${user.accessToken}` },
+      body: JSON.stringify(data),
     }
   )
 }
@@ -839,14 +959,30 @@ export async function getConversationHistory(
  */
 export async function getAuditLogs(
   user: UserProfile,
-  filters: AuditFilters
+  filters: AuditFilters,
+  pagination?: { page?: number; pageSize?: number }
 ): Promise<ApiResponse<{ logs: AuditLog[]; total: number }>> {
   if (isLocalTestAccessToken(user.accessToken)) {
+    try {
+      const params = new URLSearchParams()
+      if (filters.userId) params.set('userId', filters.userId)
+      if (filters.startDate) params.set('startDate', filters.startDate.toISOString())
+      if (filters.endDate) params.set('endDate', filters.endDate.toISOString())
+      if (filters.result) params.set('result', filters.result)
+      if (filters.documentName) params.set('documentName', filters.documentName)
+      if (pagination?.page) params.set('page', String(pagination.page))
+      if (pagination?.pageSize) params.set('pageSize', String(pagination.pageSize))
+
+      const response = await fetchWithRetry<{ logs: AuditLog[]; total: number }>(
+        `${DATA_API_URL}/audit?${params.toString()}`,
+        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
+      )
+      if (response.success) return response
+    } catch {
+      // fallback
+    }
     const logs = readLocalAuditBuffer()
-    return createApiResponse({
-      logs,
-      total: logs.length,
-    })
+    return createApiResponse({ logs, total: logs.length })
   }
 
   const params = new URLSearchParams()
@@ -855,9 +991,11 @@ export async function getAuditLogs(
   if (filters.endDate) params.set('endDate', filters.endDate.toISOString())
   if (filters.result) params.set('result', filters.result)
   if (filters.documentName) params.set('documentName', filters.documentName)
+  if (pagination?.page) params.set('page', String(pagination.page))
+  if (pagination?.pageSize) params.set('pageSize', String(pagination.pageSize))
 
   return fetchWithRetry(
-    `${N8N_BASE_URL}/audit?${params.toString()}`,
+    `${DATA_API_URL}/audit?${params.toString()}`,
     {
       method: 'GET',
       headers: {
@@ -874,11 +1012,20 @@ export async function getDashboardStats(
   user: UserProfile
 ): Promise<ApiResponse<DashboardStats>> {
   if (isLocalTestAccessToken(user.accessToken)) {
+    try {
+      const response = await fetchWithRetry<DashboardStats>(
+        `${DATA_API_URL}/dashboard/stats`,
+        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
+      )
+      if (response.success) return response
+    } catch {
+      // fallback
+    }
     return createApiResponse(createLocalDashboardStats())
   }
 
   return fetchWithRetry(
-    `${N8N_BASE_URL}/dashboard/stats`,
+    `${DATA_API_URL}/dashboard/stats`,
     {
       method: 'GET',
       headers: {
@@ -894,13 +1041,32 @@ export async function getDashboardStats(
 export async function getDashboardChartData(
   user: UserProfile,
   period: '7d' | '30d' | '90d' = '7d'
-): Promise<ApiResponse<{ timeline: ChartDataPoint[] }>> {
+): Promise<ApiResponse<{
+  timeline: ChartDataPoint[]
+  topUsers?: Array<{ userName: string; email: string; queries: number }>
+  topDocuments?: Array<{ documentName: string; type: string; accesses: number }>
+  securityEvents?: Array<{ date: string; denied: number; blocked: number; errors: number }>
+}>> {
   if (isLocalTestAccessToken(user.accessToken)) {
+    try {
+      const response = await fetchWithRetry<{
+        timeline: ChartDataPoint[]
+        topUsers?: Array<{ userName: string; email: string; queries: number }>
+        topDocuments?: Array<{ documentName: string; type: string; accesses: number }>
+        securityEvents?: Array<{ date: string; denied: number; blocked: number; errors: number }>
+      }>(
+        `${DATA_API_URL}/dashboard/charts?period=${period}`,
+        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
+      )
+      if (response.success) return response
+    } catch {
+      // fallback
+    }
     return createApiResponse(createLocalChartData(period))
   }
 
   return fetchWithRetry(
-    `${N8N_BASE_URL}/dashboard/charts?period=${period}`,
+    `${DATA_API_URL}/dashboard/charts?period=${period}`,
     {
       method: 'GET',
       headers: {

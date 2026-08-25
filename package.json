@@ -8,7 +8,10 @@
     "start": "vite --port 3000 --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --port 3000 --host 0.0.0.0",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "server:dev": "npm run dev --prefix server",
+    "server:build": "npm run build --prefix server",
+    "server:migrate": "npm run db:migrate --prefix server"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.7",

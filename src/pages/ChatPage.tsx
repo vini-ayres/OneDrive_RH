@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, DragE
 import { MessageBubble } from '../components/chat/MessageBubble'
 import { ChatInput } from '../components/chat/ChatInput'
 import { useApp } from '../contexts/AppContext'
-import { Shield, FileSearch, Sparkles, Upload } from 'lucide-react'
+import { Shield, FileSearch, Sparkles, Upload, Loader2 } from 'lucide-react'
 import { RoleBadge } from '../components/ui/Badge'
 import { getHighestRole } from '../utils/rbac'
 import { formatFileSize, MAX_UPLOAD_BYTES } from '../utils/uploadHelpers'
@@ -10,8 +10,8 @@ import { formatFileSize, MAX_UPLOAD_BYTES } from '../utils/uploadHelpers'
 const SCROLL_THRESHOLD = 100
 
 export function ChatPage() {
-  const { state } = useApp()
-  const { user, currentConversation } = state
+  const { state, dispatch } = useApp()
+  const { user, currentConversation, conversationLoadingId, conversationLoadError } = state
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const messagesListRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -83,6 +83,9 @@ export function ChatPage() {
   }, [currentConversation?.id, shouldAutoScroll, scrollToBottom])
 
   const hasMessages = currentConversation && currentConversation.messages.length > 0
+  const isLoadingConversation = Boolean(
+    currentConversation && conversationLoadingId === currentConversation.id && !hasMessages
+  )
 
   const hasFilePayload = (event: DragEvent) =>
     Array.from(event.dataTransfer?.types || []).includes('Files')
@@ -153,7 +156,22 @@ export function ChatPage() {
         className="flex-1 overflow-y-auto"
         onScroll={handleScroll}
       >
-        {!hasMessages ? (
+        {isLoadingConversation ? (
+          <div className="flex flex-col items-center justify-center h-full px-4">
+            <Loader2 size={28} className="animate-spin text-blue-600 mb-3" />
+            <p className="text-sm text-[var(--text-secondary)]">Carregando conversa...</p>
+          </div>
+        ) : conversationLoadError && currentConversation && !hasMessages ? (
+          <div className="flex flex-col items-center justify-center h-full px-4 text-center">
+            <p className="text-sm text-[var(--text-secondary)] mb-3">{conversationLoadError}</p>
+            <button
+              onClick={() => dispatch({ type: 'RELOAD_CONVERSATION' })}
+              className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 font-medium"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : !hasMessages ? (
           // Welcome screen
           <div className="flex flex-col items-center justify-center h-full px-4 py-12">
             <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg">

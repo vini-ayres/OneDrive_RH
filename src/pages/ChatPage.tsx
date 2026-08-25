@@ -3,6 +3,7 @@ import { MessageBubble } from '../components/chat/MessageBubble'
 import { ChatInput } from '../components/chat/ChatInput'
 import { useApp } from '../contexts/AppContext'
 import { Shield, FileSearch, Sparkles, Upload, Loader2 } from 'lucide-react'
+import { Logo } from '../components/ui/Logo'
 import { RoleBadge } from '../components/ui/Badge'
 import { getHighestRole } from '../utils/rbac'
 import { formatFileSize, MAX_UPLOAD_BYTES } from '../utils/uploadHelpers'
@@ -174,15 +175,15 @@ export function ChatPage() {
         ) : !hasMessages ? (
           // Welcome screen
           <div className="flex flex-col items-center justify-center h-full px-4 py-12">
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg">
-              <Shield size={32} className="text-white" />
+            <div className="mb-6 drop-shadow-lg">
+              <Logo size={64} />
             </div>
 
             <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2 text-center">
-              RH Inteligente
+              DocRH
             </h2>
             <p className="text-[var(--text-secondary)] text-center max-w-md mb-1">
-              Sistema Corporativo de Consulta de Documentos
+              Consulta inteligente de documentos de RH
             </p>
             {user && (
               <p className="text-sm text-[var(--text-muted)] text-center mb-6">

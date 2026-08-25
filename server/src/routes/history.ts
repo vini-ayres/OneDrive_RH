@@ -5,6 +5,7 @@ import {
   getConversationMessages,
   updateConversation,
   deleteConversation,
+  recordAiQueryOutcome,
 } from '../services/chatPersistence.js'
 import { apiSuccess, apiError } from '../utils/response.js'
 
@@ -98,6 +99,58 @@ history.delete('/conversations/:id', async (c) => {
   }
 
   return c.json(apiSuccess({ deleted: true }))
+})
+
+history.post('/ai-query-outcome', async (c) => {
+  const user = getAuthUser(c)
+  const body = await c.req.json().catch(() => null)
+
+  if (!body || typeof body !== 'object') {
+    const err = apiError('Payload inválido', 400)
+    return c.json(err.body, err.status)
+  }
+
+  const payload = body as Record<string, unknown>
+  const requestId = typeof payload.requestId === 'string' ? payload.requestId.trim() : ''
+  const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId.trim() : ''
+  const query = typeof payload.query === 'string' ? payload.query : ''
+  const result = payload.result === 'error' ? 'error' : payload.result === 'success' ? 'success' : null
+  const action = payload.action === 'file_upload' ? 'file_upload' : 'chat_query'
+
+  if (!requestId || !conversationId || !query || !result) {
+    const err = apiError('requestId, conversationId, query e result são obrigatórios', 400)
+    return c.json(err.body, err.status)
+  }
+
+  try {
+    const persisted = await recordAiQueryOutcome({
+      user: {
+        id: user.id,
+        userName: user.displayName || user.username,
+        userEmail: user.email,
+        roles: user.roles,
+        groups: user.groups,
+      },
+      requestId,
+      conversationId,
+      sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : undefined,
+      action,
+      result,
+      query,
+      processingMs: typeof payload.processingMs === 'number' ? payload.processingMs : undefined,
+      errorMessage: typeof payload.errorMessage === 'string' ? payload.errorMessage : undefined,
+      ipAddress: typeof payload.ipAddress === 'string' ? payload.ipAddress : undefined,
+      userAgent: typeof payload.userAgent === 'string' ? payload.userAgent : undefined,
+      documentAccessed: typeof payload.documentAccessed === 'string' ? payload.documentAccessed : undefined,
+      documentPath: typeof payload.documentPath === 'string' ? payload.documentPath : undefined,
+    })
+
+    return c.json(apiSuccess({ recorded: true, duplicate: persisted.duplicate }, { requestId }))
+  } catch (error) {
+    console.error('Failed to record AI query outcome:', error)
+    const err = apiError('PERSISTENCE_ERROR', 500)
+    return c.json(err.body, err.status)
+  }
 })
 
 export default history

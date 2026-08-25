@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
 import {
-  Menu, Sun, Moon, LogOut, User,
-  Shield, ChevronDown, Settings
+  Menu, Sun, Moon, LogOut,
+  ChevronDown, Settings
 } from 'lucide-react'
 import { useApp } from '../../contexts/AppContext'
 import { useAuth } from '../../hooks/useAuth'
 import { Avatar } from '../ui/Avatar'
 import { RoleBadge } from '../ui/Badge'
+import { Logo } from '../ui/Logo'
 import { getHighestRole } from '../../utils/rbac'
 
 export function Header() {
@@ -44,19 +45,11 @@ export function Header() {
           />
         </button>
 
-        <div className="flex items-center gap-2">
-          {/* Logo / Ícone do sistema */}
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Shield size={16} className="text-white" />
-          </div>
-          <div className="hidden sm:block">
-            <h1 className="text-sm font-semibold text-[var(--text-primary)] leading-tight">
-              RH Inteligente
-            </h1>
-            <p className="text-xs text-[var(--text-muted)] leading-tight">
-              Consulta Documental
-            </p>
-          </div>
+        <div className="hidden sm:block">
+          <Logo size={32} showWordmark subtitle="Consulta documental" />
+        </div>
+        <div className="sm:hidden">
+          <Logo size={32} />
         </div>
       </div>
 
@@ -142,16 +135,6 @@ export function Header() {
                     >
                       <Settings size={15} />
                       Configurações
-                    </button>
-                    <button
-                      onClick={() => {
-                        dispatch({ type: 'SET_VIEW', payload: 'chat' })
-                        setShowProfileMenu(false)
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
-                    >
-                      <User size={15} />
-                      Meu Perfil
                     </button>
                     <hr className="my-2 border-[var(--border-color)]" />
                     <button

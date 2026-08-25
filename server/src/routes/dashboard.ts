@@ -6,7 +6,7 @@ import {
   getDashboardChartData,
   getTopUsers,
   getTopDocuments,
-  getSecurityEvents,
+  getAiSlaEvents,
 } from '../services/dashboardQueries.js'
 import { apiSuccess, apiError } from '../utils/response.js'
 
@@ -36,11 +36,11 @@ dashboard.get('/dashboard/charts', async (c) => {
   const periodParam = c.req.query('period') || '7d'
   const period = periodParam === '30d' || periodParam === '90d' ? periodParam : '7d'
 
-  const [chartData, topUsers, topDocuments, securityEvents] = await Promise.all([
+  const [chartData, topUsers, topDocuments, aiSlaEvents] = await Promise.all([
     getDashboardChartData(period),
     getTopUsers(),
     getTopDocuments(),
-    getSecurityEvents(period === '90d' ? 90 : period === '30d' ? 30 : 7),
+    getAiSlaEvents(period === '90d' ? 90 : period === '30d' ? 30 : 7),
   ])
 
   return c.json(
@@ -48,7 +48,7 @@ dashboard.get('/dashboard/charts', async (c) => {
       ...chartData,
       topUsers,
       topDocuments,
-      securityEvents,
+      aiSlaEvents,
     })
   )
 })

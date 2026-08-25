@@ -14,30 +14,130 @@ import type { ChatCompletedEvent } from '../schemas/events.js'
 import type { UserRole } from '../middleware/rbac.js'
 import { getHighestRole } from '../middleware/rbac.js'
 
+const MAX_PROCESSING_MS = 10 * 60 * 1000
+
+function parseProcessingMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.round(value)
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.round(parsed)
+  }
+  return undefined
+}
+
+function resolveProcessingMs(
+  event: ChatCompletedEvent,
+  existingAudit?: { metadata: Record<string, string> | null } | null
+): number | undefined {
+  const fromEvent = parseProcessingMs(event.assistantMessage.processingMs)
+  if (fromEvent != null) return fromEvent
+
+  const fromMeta = parseProcessingMs(existingAudit?.metadata?.processingMs)
+  if (fromMeta != null) return fromMeta
+
+  if (!event.userMessage.timestamp) return undefined
+  const startedAt = new Date(event.userMessage.timestamp).getTime()
+  if (Number.isNaN(startedAt)) return undefined
+  const elapsed = Date.now() - startedAt
+  if (elapsed < 0 || elapsed > MAX_PROCESSING_MS) return undefined
+  return elapsed
+}
+
+export interface AiQueryOutcomeInput {
+  user: {
+    id: string
+    userName?: string
+    userEmail?: string
+    roles: UserRole[]
+    groups: string[]
+  }
+  requestId: string
+  conversationId: string
+  sessionId?: string
+  action: 'chat_query' | 'file_upload'
+  result: 'success' | 'error'
+  query: string
+  processingMs?: number
+  errorMessage?: string
+  ipAddress?: string
+  userAgent?: string
+  documentAccessed?: string
+  documentPath?: string
+}
+
 export async function persistChatCompletedEvent(event: ChatCompletedEvent): Promise<{ duplicate: boolean }> {
   return db.transaction(async (tx) => {
     const existingMessage = await tx
-      .select({ id: messages.id, content: messages.content })
+      .select({
+        id: messages.id,
+        content: messages.content,
+        status: messages.status,
+        processingMs: messages.processingMs,
+      })
       .from(messages)
       .where(eq(messages.requestId, event.requestId))
       .limit(1)
 
-    if (existingMessage.length > 0) {
-      const sameTurn = existingMessage[0].content === event.assistantMessage.content
-      if (sameTurn) {
-        return { duplicate: true }
-      }
-      event.requestId = `${event.requestId}:${crypto.randomUUID()}`
-    }
-
     const existingAudit = await tx
-      .select({ id: auditLogs.id })
+      .select({
+        id: auditLogs.id,
+        result: auditLogs.result,
+        metadata: auditLogs.metadata,
+      })
       .from(auditLogs)
       .where(eq(auditLogs.requestId, event.requestId))
       .limit(1)
 
-    if (existingAudit.length > 0) {
-      return { duplicate: true }
+    const processingMs = resolveProcessingMs(event, existingAudit[0] ?? null)
+    if (processingMs != null) {
+      event.assistantMessage.processingMs = processingMs
+    }
+
+    if (existingMessage.length > 0) {
+      const current = existingMessage[0]
+      const sameTurn = current.content === event.assistantMessage.content
+      const recoveringFromError =
+        current.status === 'error' && event.assistantMessage.status !== 'error' && !event.assistantMessage.wasBlocked
+
+      if (sameTurn || recoveringFromError) {
+        const nextMetadata = {
+          ...(existingAudit[0]?.metadata ?? {}),
+          ...(processingMs != null ? { processingMs: String(processingMs) } : {}),
+        }
+
+        await tx
+          .update(messages)
+          .set({
+            content: event.assistantMessage.content,
+            status: event.assistantMessage.wasBlocked
+              ? 'blocked'
+              : event.assistantMessage.status,
+            processingMs: processingMs ?? current.processingMs,
+            blockedReason: event.assistantMessage.blockedReason ?? null,
+          })
+          .where(eq(messages.id, current.id))
+
+        if (existingAudit[0]) {
+          await tx
+            .update(auditLogs)
+            .set({
+              result: recoveringFromError ? event.audit.result : existingAudit[0].result,
+              metadata: Object.keys(nextMetadata).length > 0 ? nextMetadata : existingAudit[0].metadata,
+            })
+            .where(eq(auditLogs.id, existingAudit[0].id))
+        }
+
+        return { duplicate: true }
+      }
+
+      // Timeout no cliente após o n8n já ter persistido sucesso: não duplicar a conversa.
+      if (event.assistantMessage.status === 'error' && current.status !== 'error') {
+        return { duplicate: true }
+      }
+
+      event.requestId = `${event.requestId}:${crypto.randomUUID()}`
     }
 
     const roles = event.user.roles.filter(Boolean) as UserRole[]
@@ -230,25 +330,184 @@ export async function persistChatCompletedEvent(event: ChatCompletedEvent): Prom
       }
     }
 
-    await tx.insert(auditLogs).values({
-      userId: event.user.id,
-      userName: event.user.userName ?? null,
-      userEmail: event.user.userEmail ?? null,
-      role: getHighestRole(roles.length > 0 ? roles : ['colaborador']),
-      action: event.audit.action,
-      query: event.userMessage.content,
-      documentAccessed: event.audit.documentAccessed ?? null,
-      documentPath: event.audit.documentPath ?? null,
-      result: event.audit.result,
-      ipAddress: event.audit.ipAddress ?? null,
-      userAgent: event.audit.userAgent ?? null,
-      sessionId: sessionId || null,
-      requestId: event.requestId,
-      metadata: event.metadata ?? null,
-    })
+    const sourceUrls = [...new Set(
+      event.assistantMessage.sources
+        .map((source) => source.webUrl?.trim())
+        .filter((url): url is string => Boolean(url))
+    )]
+    const documentPath =
+      event.audit.documentPath ??
+      event.assistantMessage.sources.find((source) => source.path)?.path ??
+      event.userMessage.attachment?.folderPath
+
+    const auditMetadata: Record<string, string> = {
+      ...(event.metadata ?? {}),
+      ...(processingMs != null ? { processingMs: String(processingMs) } : {}),
+      ...(sourceUrls[0] ? { documentUrl: sourceUrls[0] } : {}),
+      ...(sourceUrls.length > 1 ? { documentUrls: JSON.stringify(sourceUrls) } : {}),
+    }
+
+    const auditForRequest = existingAudit[0] && existingMessage.length === 0
+      ? existingAudit[0]
+      : (
+          await tx
+            .select({
+              id: auditLogs.id,
+              result: auditLogs.result,
+              metadata: auditLogs.metadata,
+            })
+            .from(auditLogs)
+            .where(eq(auditLogs.requestId, event.requestId))
+            .limit(1)
+        )[0]
+
+    if (auditForRequest) {
+      await tx
+        .update(auditLogs)
+        .set({
+          result: event.audit.result,
+          documentAccessed: event.audit.documentAccessed ?? null,
+          documentPath: documentPath ?? null,
+          metadata: {
+            ...(auditForRequest.metadata ?? {}),
+            ...auditMetadata,
+          },
+        })
+        .where(eq(auditLogs.id, auditForRequest.id))
+    } else {
+      await tx.insert(auditLogs).values({
+        userId: event.user.id,
+        userName: event.user.userName ?? null,
+        userEmail: event.user.userEmail ?? null,
+        role: getHighestRole(roles.length > 0 ? roles : ['colaborador']),
+        action: event.audit.action,
+        query: event.userMessage.content,
+        documentAccessed: event.audit.documentAccessed ?? null,
+        documentPath: documentPath ?? null,
+        result: event.audit.result,
+        ipAddress: event.audit.ipAddress ?? null,
+        userAgent: event.audit.userAgent ?? null,
+        sessionId: sessionId || null,
+        requestId: event.requestId,
+        metadata: Object.keys(auditMetadata).length > 0 ? auditMetadata : null,
+      })
+    }
 
     return { duplicate: false }
   })
+}
+
+export async function recordAiQueryOutcome(input: AiQueryOutcomeInput): Promise<{ duplicate: boolean }> {
+  if (input.result === 'error') {
+    return persistChatCompletedEvent({
+      requestId: input.requestId,
+      conversationId: input.conversationId,
+      sessionId: input.sessionId || input.requestId,
+      user: {
+        id: input.user.id,
+        userName: input.user.userName,
+        userEmail: input.user.userEmail,
+        roles: input.user.roles,
+        groups: input.user.groups,
+      },
+      userMessage: {
+        content: input.query,
+      },
+      assistantMessage: {
+        content: input.errorMessage || 'Falha na consulta da IA.',
+        status: 'error',
+        sources: [],
+        processingMs: input.processingMs,
+      },
+      audit: {
+        action: input.action,
+        result: 'error',
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        documentAccessed: input.documentAccessed,
+        documentPath: input.documentPath,
+      },
+      metadata: input.processingMs != null ? { processingMs: String(input.processingMs) } : undefined,
+    })
+  }
+
+  return applyAiQueryMetrics(input)
+}
+
+async function applyAiQueryMetrics(input: AiQueryOutcomeInput): Promise<{ duplicate: boolean }> {
+  const processingMs = parseProcessingMs(input.processingMs)
+  const now = new Date()
+  const roles = input.user.roles.length > 0 ? input.user.roles : (['colaborador'] as UserRole[])
+
+  if (processingMs != null) {
+    await db
+      .update(messages)
+      .set({ processingMs })
+      .where(eq(messages.requestId, input.requestId))
+  }
+
+  const [existingAudit] = await db
+    .select({
+      id: auditLogs.id,
+      metadata: auditLogs.metadata,
+    })
+    .from(auditLogs)
+    .where(eq(auditLogs.requestId, input.requestId))
+    .limit(1)
+
+  if (existingAudit) {
+    if (processingMs != null) {
+      await db
+        .update(auditLogs)
+        .set({
+          metadata: {
+            ...(existingAudit.metadata ?? {}),
+            processingMs: String(processingMs),
+          },
+        })
+        .where(eq(auditLogs.id, existingAudit.id))
+    }
+    return { duplicate: true }
+  }
+
+  await db
+    .insert(users)
+    .values({
+      id: input.user.id,
+      username: input.user.id,
+      displayName: input.user.userName || input.user.id,
+      email: input.user.userEmail || null,
+      roles,
+      groups: input.user.groups,
+      lastSeenAt: now,
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        displayName: input.user.userName || input.user.id,
+        email: input.user.userEmail || null,
+        lastSeenAt: now,
+      },
+    })
+
+  await db.insert(auditLogs).values({
+    userId: input.user.id,
+    userName: input.user.userName ?? null,
+    userEmail: input.user.userEmail ?? null,
+    role: getHighestRole(roles),
+    action: input.action,
+    query: input.query,
+    documentAccessed: input.documentAccessed ?? null,
+    documentPath: input.documentPath ?? null,
+    result: 'success',
+    ipAddress: input.ipAddress ?? null,
+    userAgent: input.userAgent ?? null,
+    sessionId: input.sessionId || null,
+    requestId: input.requestId,
+    metadata: processingMs != null ? { processingMs: String(processingMs) } : null,
+  })
+
+  return { duplicate: false }
 }
 
 export async function recordDocumentAccess(
@@ -300,6 +559,7 @@ export async function recordDocumentAccess(
     documentAccessed: event.name ?? null,
     documentPath: event.path ?? null,
     result: 'success',
+    metadata: event.webUrl ? { documentUrl: event.webUrl } : null,
   })
 }
 

@@ -87,6 +87,35 @@ export function isSecureUrl(url: string): boolean {
 }
 
 /**
+ * Extrai um nome curto de arquivo a partir da URL (SharePoint/OneDrive).
+ */
+export function fileNameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const fromQuery = parsed.searchParams.get('file') || parsed.searchParams.get('name')
+    if (fromQuery?.trim()) return decodeURIComponent(fromQuery.trim())
+
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const decoded = decodeURIComponent(segments[i] || '').trim()
+      if (!decoded || decoded.startsWith(':')) continue
+      if (decoded.includes('.') || i === segments.length - 1) return decoded
+    }
+  } catch {
+    // ignore
+  }
+  return 'Abrir documento'
+}
+
+export function documentLinkLabel(name: string | undefined, url: string): string {
+  const trimmed = name?.trim()
+  if (trimmed && !/^https?:\/\//i.test(trimmed) && trimmed.length <= 120) {
+    return trimmed
+  }
+  return fileNameFromUrl(url)
+}
+
+/**
  * Mascara dados sensíveis para logs
  */
 export function maskSensitiveData(data: Record<string, unknown>): Record<string, unknown> {

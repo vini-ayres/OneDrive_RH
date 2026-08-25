@@ -7,6 +7,41 @@ export interface AuthUser {
   email: string
   roles: UserRole[]
   groups: string[]
+  jobTitle?: string
+  department?: string
+  officeLocation?: string
+  mobilePhone?: string
+}
+
+export const ROLE_GROUP_MAP: Record<string, UserRole> = {
+  'RH-Sistema-Diretoria': 'diretoria',
+  'RH-Sistema-RH': 'rh',
+  'RH-Sistema-Gestores': 'gestor',
+  'RH-Sistema-Colaboradores': 'colaborador',
+  GRP_docrh_consulta: 'colaborador',
+  GRP_docrh_admin: 'admin',
+}
+
+function groupCn(group: string): string {
+  const first = group.split(',')[0]?.trim() || group
+  return first.replace(/^CN=/i, '').trim()
+}
+
+export function getRolesFromGroups(groups: string[]): UserRole[] {
+  const roles = new Set<UserRole>()
+  const map = new Map(
+    Object.entries(ROLE_GROUP_MAP).map(([name, role]) => [name.toLowerCase(), role])
+  )
+
+  for (const group of groups) {
+    const normalized = group.trim()
+    if (!normalized) continue
+    const role = map.get(normalized.toLowerCase()) || map.get(groupCn(normalized).toLowerCase())
+    if (role) roles.add(role)
+  }
+
+  if (roles.size === 0) roles.add('colaborador')
+  return Array.from(roles)
 }
 
 export interface Permission {

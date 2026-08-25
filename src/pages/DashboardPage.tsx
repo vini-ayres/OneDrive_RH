@@ -5,8 +5,8 @@ import {
   Legend
 } from 'recharts'
 import {
-  MessageSquare, Users, FileText, ShieldOff,
-  XCircle, Activity,
+  MessageSquare, Users, FileText, AlertTriangle,
+  Gauge, Activity,
   RefreshCw, Download, Loader2
 } from 'lucide-react'
 import { useApp } from '../contexts/AppContext'
@@ -82,14 +82,13 @@ export function DashboardPage() {
     }))
   }, [chartsQuery.data?.topUsers])
 
-  const securityData = useMemo(() => {
-    return (chartsQuery.data?.securityEvents ?? []).map((e) => ({
+  const slaData = useMemo(() => {
+    return (chartsQuery.data?.aiSlaEvents ?? []).map((e) => ({
       date: formatChartDate(e.date),
-      blocked: e.blocked,
-      denied: e.denied,
-      errors: e.errors,
+      successes: e.successes,
+      failures: e.failures,
     }))
-  }, [chartsQuery.data?.securityEvents])
+  }, [chartsQuery.data?.aiSlaEvents])
 
   const handleRefresh = () => {
     statsQuery.refetch()
@@ -122,25 +121,25 @@ export function DashboardPage() {
       subtitle: 'Únicos este mês',
     },
     {
-      title: 'Consultas Bloqueadas',
-      value: stats?.blockedQueries ?? '—',
-      icon: <ShieldOff size={18} className="text-yellow-600" />,
-      color: 'bg-yellow-50 dark:bg-yellow-900/20',
-      subtitle: 'Por política RBAC',
+      title: 'Falhas de Consulta da IA',
+      value: stats?.failedQueries ?? '—',
+      icon: <AlertTriangle size={18} className="text-orange-600" />,
+      color: 'bg-orange-50 dark:bg-orange-900/20',
+      subtitle: 'SLA da IA · este mês',
     },
     {
-      title: 'Acessos Negados',
-      value: stats?.deniedAccess ?? '—',
-      icon: <XCircle size={18} className="text-red-600" />,
-      color: 'bg-red-50 dark:bg-red-900/20',
-      subtitle: 'Tentativas bloqueadas',
+      title: 'SLA da IA',
+      value: stats ? `${stats.slaPercent}%` : '—',
+      icon: <Gauge size={18} className="text-emerald-600" />,
+      color: 'bg-emerald-50 dark:bg-emerald-900/20',
+      subtitle: 'Consultas concluídas com sucesso',
     },
     {
       title: 'Tempo Médio',
-      value: stats ? `${stats.avgResponseTime}s` : '—',
+      value: stats && stats.avgResponseTime > 0 ? `${stats.avgResponseTime}s` : '—',
       icon: <Activity size={18} className="text-indigo-600" />,
       color: 'bg-indigo-50 dark:bg-indigo-900/20',
-      subtitle: 'Resposta da IA',
+      subtitle: 'Prompt → resposta do webhook',
     },
   ]
 
@@ -212,9 +211,9 @@ export function DashboardPage() {
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                   </linearGradient>
-                  <linearGradient id="colorBlocked" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                  <linearGradient id="colorFailures" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
@@ -230,7 +229,7 @@ export function DashboardPage() {
                 />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
                 <Area type="monotone" dataKey="queries" name="Consultas" stroke="#3b82f6" strokeWidth={2} fill="url(#colorQueries)" />
-                <Area type="monotone" dataKey="blocked" name="Bloqueadas" stroke="#ef4444" strokeWidth={2} fill="url(#colorBlocked)" />
+                <Area type="monotone" dataKey="failures" name="Falhas da IA" stroke="#f97316" strokeWidth={2} fill="url(#colorFailures)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -251,14 +250,18 @@ export function DashboardPage() {
                     <Tooltip contentStyle={{ backgroundColor: isDark ? '#1e1e1e' : '#fff', border: `1px solid ${isDark ? '#2a2a2a' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '11px' }} />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="space-y-1.5 mt-2">
+                <div className="space-y-2 mt-2">
                   {documentData.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
-                        <span className="text-[var(--text-secondary)] truncate max-w-[120px]">{item.name}</span>
+                    <div key={i} className="flex items-start justify-between gap-3 text-xs">
+                      <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: item.color }} />
+                        <span className="text-[var(--text-secondary)] break-words leading-snug" title={item.name}>
+                          {item.name}
+                        </span>
                       </div>
-                      <span className="font-medium text-[var(--text-primary)]">{item.value}</span>
+                      <span className="font-medium text-[var(--text-primary)] flex-shrink-0 tabular-nums">
+                        {item.value}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -286,20 +289,19 @@ export function DashboardPage() {
           </div>
 
           <div className="card">
-            <h3 className="font-semibold text-[var(--text-primary)] mb-4">Eventos de Segurança</h3>
-            {securityData.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">Sem eventos no período.</p>
+            <h3 className="font-semibold text-[var(--text-primary)] mb-4">SLA da IA</h3>
+            {slaData.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">Sem consultas no período.</p>
             ) : (
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={securityData}>
+                <BarChart data={slaData}>
                   <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: textColor }} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: textColor }} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={{ backgroundColor: isDark ? '#1e1e1e' : '#fff', border: `1px solid ${isDark ? '#2a2a2a' : '#e2e8f0'}`, borderRadius: '8px', fontSize: '12px' }} />
                   <Legend wrapperStyle={{ fontSize: '11px' }} />
-                  <Bar dataKey="blocked" name="Bloqueadas" fill="#f59e0b" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="denied" name="Negadas" fill="#ef4444" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="errors" name="Erros" fill="#6b7280" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="successes" name="Sucesso" fill="#10b981" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="failures" name="Falhas de Consulta" fill="#f97316" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}

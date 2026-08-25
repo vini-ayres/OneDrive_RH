@@ -6,12 +6,6 @@ import {
 } from '../types'
 import { generateCsrfToken, generateSessionId } from '../utils/security'
 import { fileToBase64 } from '../utils/uploadHelpers'
-import {
-  LOCAL_TEST_ACCESS_TOKEN,
-  LOCAL_TEST_USER_EMAIL,
-  LOCAL_TEST_USER_ID,
-  LOCAL_TEST_USER_NAME,
-} from '../utils/localTestUser'
 
 const N8N_BASE_URL = (import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook').trim()
 const N8N_CHAT_WEBHOOK_URL = (
@@ -175,195 +169,12 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
   }
 }
 
-function isLocalTestAccessToken(accessToken?: string): boolean {
-  return accessToken === LOCAL_TEST_ACCESS_TOKEN
-}
-
 function buildN8nAuthHeaders(accessToken?: string): Record<string, string> {
-  if (isLocalTestAccessToken(accessToken) || !accessToken) {
+  if (!accessToken) {
     return {}
   }
 
   return { Authorization: `Bearer ${accessToken}` }
-}
-
-function createApiResponse<T>(data: T, requestId = generateSessionId()): ApiResponse<T> {
-  return {
-    success: true,
-    data,
-    requestId,
-    timestamp: new Date().toISOString(),
-  }
-}
-
-function createMockSources(query: string): DocumentSource[] {
-  const normalized = query.toLowerCase()
-  const now = new Date()
-
-  const baseSources: DocumentSource[] = [
-    {
-      id: generateSessionId(),
-      name: 'Regulamento_Interno_2024.pdf',
-      path: '/RH/Políticas/Regulamento_Interno_2024.pdf',
-      modifiedAt: now,
-      webUrl: 'https://example.com/regulamento-interno',
-      type: 'pdf',
-      relevanceScore: 0.97,
-      excerpt: 'Documento-base com políticas internas, condutas e regras de acesso.',
-    },
-    {
-      id: generateSessionId(),
-      name: 'Manual_de_Onboarding.pdf',
-      path: '/RH/Admissão/Manual_de_Onboarding.pdf',
-      modifiedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
-      webUrl: 'https://example.com/manual-onboarding',
-      type: 'pdf',
-      relevanceScore: 0.89,
-      excerpt: 'Resumo do processo de integração e documentos admissionais.',
-    },
-    {
-      id: generateSessionId(),
-      name: 'Política_de_Benefícios_v3.docx',
-      path: '/RH/Políticas/Política_de_Benefícios_v3.docx',
-      modifiedAt: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
-      webUrl: 'https://example.com/politica-beneficios',
-      type: 'docx',
-      relevanceScore: 0.84,
-      excerpt: 'Regras de benefícios, elegibilidade e procedimentos de solicitação.',
-    },
-  ]
-
-  if (normalized.includes('contrat')) {
-    return [
-      {
-        id: generateSessionId(),
-        name: 'Contrato_Trabalho_Template.docx',
-        path: '/RH/Contratos/Contrato_Trabalho_Template.docx',
-        modifiedAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-        webUrl: 'https://example.com/contrato-trabalho',
-        type: 'docx',
-        relevanceScore: 0.98,
-        excerpt: 'Modelo de contrato de trabalho e cláusulas padrão.',
-      },
-      baseSources[0],
-    ]
-  }
-
-  if (normalized.includes('holer') || normalized.includes('salario') || normalized.includes('salário')) {
-    return [
-      {
-        id: generateSessionId(),
-        name: 'Holerite_Template.xlsx',
-        path: '/RH/Holerites/Holerite_Template.xlsx',
-        modifiedAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
-        webUrl: 'https://example.com/holerite',
-        type: 'xlsx',
-        relevanceScore: 0.96,
-        excerpt: 'Estrutura de demonstrativo de pagamento para fins de teste.',
-      },
-      baseSources[2],
-    ]
-  }
-
-  return baseSources
-}
-
-function createProcessingSteps(): ProcessingStep[] {
-  const now = new Date()
-  return [
-    { id: 'auth', label: 'Verificando autenticação...', status: 'done', timestamp: now },
-    { id: 'search', label: 'Consultando OneDrive/SharePoint...', status: 'done', timestamp: now },
-    { id: 'analyze', label: 'Analisando documentos...', status: 'done', timestamp: now },
-    { id: 'generate', label: 'Gerando resposta...', status: 'done', timestamp: now },
-  ]
-}
-
-function createLocalChatResponse(query: string): ApiResponse<ChatApiResponse> {
-  const sources = createMockSources(query)
-  const lower = query.toLowerCase()
-
-  let answer = `**Resposta local de teste**\n\nRecebi a consulta: "${query}".\n\nEste ambiente está em modo local, então a resposta abaixo é simulada para validar a interface, o RBAC e a apresentação de fontes.`
-
-  if (lower.includes('contrat')) {
-    answer += `\n\nPara testes, a busca aponta para o modelo de contrato e o regulamento interno, que normalmente são os principais documentos de referência nesta categoria.`
-  } else if (lower.includes('holer') || lower.includes('salario') || lower.includes('salário')) {
-    answer += `\n\nPara testes, a consulta encontrou um holerite-modelo e a política de benefícios associada.`
-  } else if (lower.includes('documentos admissionais') || lower.includes('admiss')) {
-    answer += `\n\nPara testes, o ambiente retorna o manual de onboarding e documentos admissionais correlatos.`
-  } else {
-    answer += `\n\nVocê pode usar este perfil local para navegar pelo dashboard, documentos, auditoria e chat sem depender do backend n8n.`
-  }
-
-  return createApiResponse<ChatApiResponse>({
-    answer,
-    sources,
-    processingSteps: createProcessingSteps(),
-    wasBlocked: false,
-    requestId: generateSessionId(),
-    processingTimeMs: 640,
-  })
-}
-
-function createLocalDocumentResults(query: string): DocumentSource[] {
-  return createMockSources(query)
-}
-
-function readLocalAuditBuffer(): AuditLog[] {
-  try {
-    const existing = sessionStorage.getItem('audit_buffer')
-    if (!existing) return []
-
-    const raw = JSON.parse(existing) as Array<Partial<AuditLog>>
-    return raw.map(item => ({
-      id: item.id || generateSessionId(),
-      userId: item.userId || LOCAL_TEST_USER_ID,
-      userName: item.userName || LOCAL_TEST_USER_NAME,
-      userEmail: item.userEmail || LOCAL_TEST_USER_EMAIL,
-      action: item.action || 'chat_query',
-      query: item.query || '',
-      documentAccessed: item.documentAccessed,
-      documentPath: item.documentPath,
-      result: item.result || 'success',
-      ipAddress: item.ipAddress || 'browser',
-      userAgent: item.userAgent || navigator.userAgent,
-      timestamp: item.timestamp ? new Date(String(item.timestamp)) : new Date(),
-      sessionId: item.sessionId || generateSessionId(),
-      role: item.role || 'admin',
-      metadata: item.metadata,
-    }))
-  } catch {
-    return []
-  }
-}
-
-function createLocalDashboardStats(): DashboardStats {
-  return {
-    queriesToday: 12,
-    activeUsers: 1,
-    documentsAccessed: 38,
-    blockedQueries: 2,
-    deniedAccess: 0,
-    totalQueriesMonth: 86,
-    avgResponseTime: 1.8,
-  }
-}
-
-function createLocalChartData(period: '7d' | '30d' | '90d'): { timeline: ChartDataPoint[] } {
-  const days = period === '30d' ? 30 : period === '90d' ? 90 : 7
-  const start = new Date()
-  const points = Array.from({ length: days }, (_, index) => {
-    const day = new Date(start)
-    day.setDate(start.getDate() - (days - 1 - index))
-
-    return {
-      date: day.toISOString().slice(0, 10),
-      queries: 8 + (index % 7) * 3,
-      users: 1 + (index % 4),
-      blocked: index % 5 === 0 ? 2 : 0,
-    }
-  })
-
-  return { timeline: points }
 }
 
 function getChatEndpoint(): string {
@@ -384,7 +195,8 @@ function getUploadEndpoint(): string {
 
 function buildN8nChatPayload(payload: ChatPayload): string {
   const sessionId = payload.metadata?.sessionId || payload.conversationId || generateSessionId()
-  const requestId = generateSessionId()
+  const requestId = payload.requestId || generateSessionId()
+  const promptSentAt = payload.promptSentAt || payload.metadata.timestamp || new Date().toISOString()
 
   return JSON.stringify({
     query: payload.query,
@@ -392,13 +204,14 @@ function buildN8nChatPayload(payload: ChatPayload): string {
     session_id: sessionId,
     conversationId: payload.conversationId,
     requestId,
+    promptSentAt,
     userId: payload.userId,
     userName: payload.userName,
     userEmail: payload.userEmail,
     userGroups: payload.userGroups,
     userRoles: payload.userRoles,
     metadata: payload.metadata,
-    timestamp: payload.metadata.timestamp,
+    timestamp: promptSentAt,
   })
 }
 
@@ -603,28 +416,45 @@ async function fetchWithRetry<T>(
 export async function sendChatMessage(
   payload: ChatPayload
 ): Promise<ApiResponse<ChatApiResponse>> {
+  const requestId = payload.requestId || generateSessionId()
+  const promptSentAt = payload.promptSentAt || new Date().toISOString()
+  const startedAt = Date.now()
+
   try {
     const response = await fetchN8nWithRetry<unknown>(
       getChatEndpoint(),
       {
         method: 'POST',
         headers: buildN8nAuthHeaders(payload.accessToken),
-        body: buildN8nChatPayload(payload),
+        body: buildN8nChatPayload({ ...payload, requestId, promptSentAt }),
       },
       2,
       120000 // 2 minutos para respostas de IA
     )
 
+    const processingTimeMs = Date.now() - startedAt
     const chatData = coerceChatResponse(response.data)
     if (response.success && chatData) {
       return {
         ...response,
-        data: chatData,
+        data: {
+          ...chatData,
+          requestId,
+          processingTimeMs,
+        },
+        requestId,
       }
     }
 
-    throw new Error(response.error || response.message || 'Erro na resposta da API')
+    throw Object.assign(new Error(response.error || response.message || 'Erro na resposta da API'), {
+      requestId,
+      processingTimeMs,
+    })
   } catch (error) {
+    const processingTimeMs = Date.now() - startedAt
+    if (error instanceof Error) {
+      Object.assign(error, { requestId, processingTimeMs })
+    }
     throw error
   }
 }
@@ -721,7 +551,9 @@ export async function uploadFileToOneDrive(
   payload: UploadPayload
 ): Promise<ApiResponse<UploadApiResponse>> {
   const sessionId = payload.metadata.sessionId || payload.conversationId || generateSessionId()
-  const requestId = generateSessionId()
+  const requestId = payload.requestId || generateSessionId()
+  const promptSentAt = payload.promptSentAt || payload.metadata.timestamp || new Date().toISOString()
+  const startedAt = Date.now()
   const mimeType = payload.file.type || 'application/octet-stream'
   const fileBase64 = await fileToBase64(payload.file)
 
@@ -739,42 +571,60 @@ export async function uploadFileToOneDrive(
     session_id: sessionId,
     conversationId: payload.conversationId,
     requestId,
+    promptSentAt,
     userId: payload.userId,
     userName: payload.userName,
     userEmail: payload.userEmail,
     userGroups: payload.userGroups,
     userRoles: payload.userRoles,
-    timestamp: payload.metadata.timestamp,
+    timestamp: promptSentAt,
   }
 
-  const response = await fetchN8nWithRetry<unknown>(
-    getUploadEndpoint(),
-    {
-      method: 'POST',
-      headers: {
-        ...buildN8nAuthHeaders(payload.accessToken),
-        'Content-Type': 'application/json',
+  try {
+    const response = await fetchN8nWithRetry<unknown>(
+      getUploadEndpoint(),
+      {
+        method: 'POST',
+        headers: {
+          ...buildN8nAuthHeaders(payload.accessToken),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(jsonPayload),
       },
-      body: JSON.stringify(jsonPayload),
-    },
-    1,
-    180000
-  )
+      1,
+      180000
+    )
 
-  const uploadData = coerceUploadResponse(response.data)
-  if (response.success && uploadData && uploadData.success !== false) {
-    return {
-      ...response,
-      data: uploadData,
+    const processingTimeMs = Date.now() - startedAt
+    const uploadData = coerceUploadResponse(response.data)
+    if (response.success && uploadData && uploadData.success !== false) {
+      return {
+        ...response,
+        data: {
+          ...uploadData,
+          requestId: uploadData.requestId || requestId,
+          processingTimeMs,
+        },
+        requestId,
+      }
     }
-  }
 
-  throw new Error(
-    response.error ||
-    response.message ||
-    uploadData?.message ||
-    'Erro no upload do arquivo'
-  )
+    throw Object.assign(
+      new Error(
+        response.error ||
+        response.message ||
+        uploadData?.message ||
+        'Erro no upload do arquivo'
+      ),
+      { requestId, processingTimeMs }
+    )
+  } catch (error) {
+    const processingTimeMs = Date.now() - startedAt
+    if (error instanceof Error) {
+      Object.assign(error, { requestId, processingTimeMs })
+    }
+    throw error
+  }
 }
 
 /**
@@ -785,10 +635,6 @@ export async function searchDocuments(
   user: UserProfile,
   filters?: { type?: string; folder?: string }
 ): Promise<ApiResponse<DocumentSource[]>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    return createApiResponse(createLocalDocumentResults(query))
-  }
-
   return fetchWithRetry<DocumentSource[]>(
     `${N8N_BASE_URL}/search`,
     {
@@ -905,28 +751,6 @@ export async function getRecentDocuments(
   user: UserProfile,
   limit = 50
 ): Promise<ApiResponse<{ documents: Array<{ id: string; name: string; type: string; folder: string; modifiedAt: string; webUrl: string; source?: string }> }>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    try {
-      const response = await fetchWithRetry<{ documents: Array<{ id: string; name: string; type: string; folder: string; modifiedAt: string; webUrl: string }> }>(
-        `${DATA_API_URL}/documents/recent?limit=${limit}`,
-        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
-      )
-      if (response.success) return response
-    } catch {
-      // fallback below
-    }
-    return createApiResponse({
-      documents: createLocalDocumentResults('').map(d => ({
-        id: d.id,
-        name: d.name,
-        type: d.type,
-        folder: d.path.split('/').slice(0, -1).join('/') || 'RH',
-        modifiedAt: d.modifiedAt.toISOString(),
-        webUrl: d.webUrl,
-      })),
-    })
-  }
-
   return fetchWithRetry(
     `${DATA_API_URL}/documents/recent?limit=${limit}`,
     {
@@ -961,30 +785,7 @@ export async function getAuditLogs(
   user: UserProfile,
   filters: AuditFilters,
   pagination?: { page?: number; pageSize?: number }
-): Promise<ApiResponse<{ logs: AuditLog[]; total: number }>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    try {
-      const params = new URLSearchParams()
-      if (filters.userId) params.set('userId', filters.userId)
-      if (filters.startDate) params.set('startDate', filters.startDate.toISOString())
-      if (filters.endDate) params.set('endDate', filters.endDate.toISOString())
-      if (filters.result) params.set('result', filters.result)
-      if (filters.documentName) params.set('documentName', filters.documentName)
-      if (pagination?.page) params.set('page', String(pagination.page))
-      if (pagination?.pageSize) params.set('pageSize', String(pagination.pageSize))
-
-      const response = await fetchWithRetry<{ logs: AuditLog[]; total: number }>(
-        `${DATA_API_URL}/audit?${params.toString()}`,
-        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
-      )
-      if (response.success) return response
-    } catch {
-      // fallback
-    }
-    const logs = readLocalAuditBuffer()
-    return createApiResponse({ logs, total: logs.length })
-  }
-
+): Promise<ApiResponse<{ logs: AuditLog[]; total: number; counts?: { total: number; success: number; error: number } }>> {
   const params = new URLSearchParams()
   if (filters.userId) params.set('userId', filters.userId)
   if (filters.startDate) params.set('startDate', filters.startDate.toISOString())
@@ -1011,19 +812,6 @@ export async function getAuditLogs(
 export async function getDashboardStats(
   user: UserProfile
 ): Promise<ApiResponse<DashboardStats>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    try {
-      const response = await fetchWithRetry<DashboardStats>(
-        `${DATA_API_URL}/dashboard/stats`,
-        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
-      )
-      if (response.success) return response
-    } catch {
-      // fallback
-    }
-    return createApiResponse(createLocalDashboardStats())
-  }
-
   return fetchWithRetry(
     `${DATA_API_URL}/dashboard/stats`,
     {
@@ -1045,26 +833,8 @@ export async function getDashboardChartData(
   timeline: ChartDataPoint[]
   topUsers?: Array<{ userName: string; email: string; queries: number }>
   topDocuments?: Array<{ documentName: string; type: string; accesses: number }>
-  securityEvents?: Array<{ date: string; denied: number; blocked: number; errors: number }>
+  aiSlaEvents?: Array<{ date: string; successes: number; failures: number }>
 }>> {
-  if (isLocalTestAccessToken(user.accessToken)) {
-    try {
-      const response = await fetchWithRetry<{
-        timeline: ChartDataPoint[]
-        topUsers?: Array<{ userName: string; email: string; queries: number }>
-        topDocuments?: Array<{ documentName: string; type: string; accesses: number }>
-        securityEvents?: Array<{ date: string; denied: number; blocked: number; errors: number }>
-      }>(
-        `${DATA_API_URL}/dashboard/charts?period=${period}`,
-        { method: 'GET', headers: { Authorization: `Bearer ${user.accessToken}` } }
-      )
-      if (response.success) return response
-    } catch {
-      // fallback
-    }
-    return createApiResponse(createLocalChartData(period))
-  }
-
   return fetchWithRetry(
     `${DATA_API_URL}/dashboard/charts?period=${period}`,
     {
@@ -1074,6 +844,58 @@ export async function getDashboardChartData(
       },
     }
   )
+}
+
+/**
+ * Registra o resultado da consulta da IA (sucesso com tempo de resposta, ou falha no n8n)
+ */
+export async function recordAiQueryOutcome(
+  user: UserProfile,
+  event: {
+    requestId: string
+    conversationId: string
+    sessionId?: string
+    action: 'chat_query' | 'file_upload'
+    result: 'success' | 'error'
+    query: string
+    processingMs?: number
+    errorMessage?: string
+    documentAccessed?: string
+    documentPath?: string
+  }
+): Promise<void> {
+  try {
+    await fetchWithRetry(
+      `${DATA_API_URL}/ai-query-outcome`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${user.accessToken}` },
+        body: JSON.stringify({
+          ...event,
+          ipAddress: 'browser',
+          userAgent: navigator.userAgent,
+        }),
+      },
+      1,
+      15000
+    )
+  } catch {
+    logAuditEventLocal({
+      userId: user.id,
+      userName: user.displayName,
+      userEmail: user.email,
+      action: event.action,
+      query: event.query,
+      documentAccessed: event.documentAccessed,
+      documentPath: event.documentPath,
+      result: event.result,
+      ipAddress: 'browser',
+      userAgent: navigator.userAgent,
+      sessionId: event.sessionId || event.requestId,
+      role: user.roles[0] || 'colaborador',
+      metadata: event.processingMs != null ? { processingMs: String(event.processingMs) } : undefined,
+    })
+  }
 }
 
 /**

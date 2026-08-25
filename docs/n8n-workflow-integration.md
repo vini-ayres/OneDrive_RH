@@ -50,9 +50,9 @@ A API **preenche o resto automaticamente**:
   "conversationId": "5f1350f328257eb59f715fe04f557da2266c407c26fe767d98ac0c841280d30f",
   "sessionId": "c2462d577db64f46ee2536b63ea5e8424676d8198893be017fe4cdf0d5fa566a",
   "user": {
-    "id": "local-test-user",
-    "userName": "Usuário de Teste Local",
-    "userEmail": "teste.local@empresa.local"
+    "id": "usuario.exemplo",
+    "userName": "Nome Completo",
+    "userEmail": "usuario@empresa.com"
   },
   "userMessage": {
     "content": "Jogue este arquivo na pasta Procedimentos de TI",

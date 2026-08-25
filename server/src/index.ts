@@ -3,6 +3,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { env } from './env.js'
 import { internalApiKeyMiddleware } from './middleware/auth.js'
+import { isLdapConfigured } from './services/ldapAuth.js'
+import auth from './routes/auth.js'
 import history from './routes/history.js'
 import audit from './routes/audit.js'
 import dashboard from './routes/dashboard.js'
@@ -21,9 +23,14 @@ app.use(
 )
 
 app.get('/health', (c) =>
-  c.json({ status: 'ok', timestamp: new Date().toISOString() })
+  c.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    ldap: { configured: isLdapConfigured() },
+  })
 )
 
+app.route('/api/auth', auth)
 app.route('/api', history)
 app.route('/api', audit)
 app.route('/api', dashboard)

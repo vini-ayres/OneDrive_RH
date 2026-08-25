@@ -1,19 +1,26 @@
 import { UserRole, Permission, ROLE_PERMISSIONS, ROLE_GROUP_MAP, UserProfile } from '../types'
 
+function groupCn(group: string): string {
+  const first = group.split(',')[0]?.trim() || group
+  return first.replace(/^CN=/i, '').trim()
+}
+
 /**
  * Determina os papéis do usuário baseado nos grupos do Active Directory
  */
 export function getRolesFromGroups(groups: string[]): UserRole[] {
   const roles: Set<UserRole> = new Set()
+  const map = new Map(
+    Object.entries(ROLE_GROUP_MAP).map(([name, role]) => [name.toLowerCase(), role])
+  )
 
   for (const group of groups) {
-    const role = ROLE_GROUP_MAP[group]
-    if (role) {
-      roles.add(role)
-    }
+    const normalized = group.trim()
+    if (!normalized) continue
+    const role = map.get(normalized.toLowerCase()) || map.get(groupCn(normalized).toLowerCase())
+    if (role) roles.add(role)
   }
 
-  // Se nenhum papel encontrado, atribuir colaborador por padrão
   if (roles.size === 0) {
     roles.add('colaborador')
   }

@@ -1,6 +1,12 @@
 import { eq, and, gte, sql, count, avg } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { auditLogs, sessions, documentAccesses, messages } from '../db/schema.js'
+import { auditLogs, sessions, documentAccesses, messages, conversations } from '../db/schema.js'
+import {
+  excludeTestUserFromAudit,
+  excludeTestUserFromDocumentAccesses,
+  excludeTestUserFromSessions,
+  excludeTestUserFromConversations,
+} from './excludedUsers.js'
 
 function startOfDay(date: Date): Date {
   const d = new Date(date)
@@ -29,6 +35,7 @@ export async function getDashboardStats() {
     .from(auditLogs)
     .where(
       and(
+        excludeTestUserFromAudit(),
         gte(auditLogs.createdAt, today),
         sql`${auditLogs.action} IN ('chat_query', 'file_upload')`
       )
@@ -37,47 +44,76 @@ export async function getDashboardStats() {
   const [activeUsers] = await db
     .select({ count: sql<number>`COUNT(DISTINCT ${sessions.userId})` })
     .from(sessions)
-    .where(gte(sessions.lastActivity, activeThreshold))
+    .where(and(excludeTestUserFromSessions(), gte(sessions.lastActivity, activeThreshold)))
 
   const [documentsAccessed] = await db
     .select({ count: sql<number>`COUNT(DISTINCT ${documentAccesses.documentId})` })
     .from(documentAccesses)
-    .where(gte(documentAccesses.accessedAt, monthStart))
+    .where(and(excludeTestUserFromDocumentAccesses(), gte(documentAccesses.accessedAt, monthStart)))
 
-  const [blockedQueries] = await db
+  const [failedQueries] = await db
     .select({ count: count() })
     .from(auditLogs)
-    .where(and(gte(auditLogs.createdAt, monthStart), eq(auditLogs.result, 'blocked')))
-
-  const [deniedAccess] = await db
-    .select({ count: count() })
-    .from(auditLogs)
-    .where(and(gte(auditLogs.createdAt, monthStart), eq(auditLogs.result, 'denied')))
+    .where(
+      and(
+        excludeTestUserFromAudit(),
+        gte(auditLogs.createdAt, monthStart),
+        eq(auditLogs.result, 'error'),
+        sql`${auditLogs.action} IN ('chat_query', 'file_upload')`
+      )
+    )
 
   const [totalQueriesMonth] = await db
     .select({ count: count() })
     .from(auditLogs)
     .where(
       and(
+        excludeTestUserFromAudit(),
         gte(auditLogs.createdAt, monthStart),
         sql`${auditLogs.action} IN ('chat_query', 'file_upload')`
+      )
+    )
+
+  const [avgAudit] = await db
+    .select({
+      avg: sql<number>`AVG((${auditLogs.metadata}->>'processingMs')::numeric)`,
+    })
+    .from(auditLogs)
+    .where(
+      and(
+        excludeTestUserFromAudit(),
+        gte(auditLogs.createdAt, monthStart),
+        sql`${auditLogs.action} IN ('chat_query', 'file_upload')`,
+        sql`(${auditLogs.metadata} ->> 'processingMs') IS NOT NULL`
       )
     )
 
   const [avgResponse] = await db
     .select({ avg: avg(messages.processingMs) })
     .from(messages)
-    .where(and(gte(messages.createdAt, monthStart), sql`${messages.processingMs} IS NOT NULL`))
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .where(
+      and(
+        excludeTestUserFromConversations(),
+        gte(messages.createdAt, monthStart),
+        sql`${messages.processingMs} IS NOT NULL`,
+        eq(messages.role, 'assistant')
+      )
+    )
 
-  const avgMs = avgResponse?.avg ? Number(avgResponse.avg) : 0
+  const avgMs = Number(avgAudit?.avg || avgResponse?.avg || 0)
+  const totalAiQueries = totalQueriesMonth?.count ?? 0
+  const failures = failedQueries?.count ?? 0
+  const slaPercent =
+    totalAiQueries === 0 ? 100 : Math.round(((totalAiQueries - failures) / totalAiQueries) * 1000) / 10
 
   return {
     queriesToday: queriesToday?.count ?? 0,
     activeUsers: Number(activeUsers?.count ?? 0),
     documentsAccessed: Number(documentsAccessed?.count ?? 0),
-    blockedQueries: blockedQueries?.count ?? 0,
-    deniedAccess: deniedAccess?.count ?? 0,
-    totalQueriesMonth: totalQueriesMonth?.count ?? 0,
+    failedQueries: failures,
+    slaPercent,
+    totalQueriesMonth: totalAiQueries,
     avgResponseTime: Math.round((avgMs / 1000) * 10) / 10,
   }
 }
@@ -91,10 +127,10 @@ export async function getDashboardChartData(period: '7d' | '30d' | '90d') {
       date: sql<string>`DATE(${auditLogs.createdAt})`.as('date'),
       queries: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.action} IN ('chat_query', 'file_upload'))`.as('queries'),
       users: sql<number>`COUNT(DISTINCT ${auditLogs.userId})`.as('users'),
-      blocked: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'blocked')`.as('blocked'),
+      failures: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'error' AND ${auditLogs.action} IN ('chat_query', 'file_upload'))`.as('failures'),
     })
     .from(auditLogs)
-    .where(gte(auditLogs.createdAt, since))
+    .where(and(excludeTestUserFromAudit(), gte(auditLogs.createdAt, since)))
     .groupBy(sql`DATE(${auditLogs.createdAt})`)
     .orderBy(sql`DATE(${auditLogs.createdAt})`)
 
@@ -102,7 +138,7 @@ export async function getDashboardChartData(period: '7d' | '30d' | '90d') {
     date: typeof row.date === 'string' ? row.date : String(row.date),
     queries: Number(row.queries),
     users: Number(row.users),
-    blocked: Number(row.blocked),
+    failures: Number(row.failures),
   }))
 
   return { timeline }
@@ -120,6 +156,7 @@ export async function getTopUsers(limit = 5) {
     .from(auditLogs)
     .where(
       and(
+        excludeTestUserFromAudit(),
         gte(auditLogs.createdAt, monthStart),
         sql`${auditLogs.action} IN ('chat_query', 'file_upload')`
       )
@@ -145,7 +182,7 @@ export async function getTopDocuments(limit = 5) {
       accesses: count(),
     })
     .from(documentAccesses)
-    .where(gte(documentAccesses.accessedAt, monthStart))
+    .where(and(excludeTestUserFromDocumentAccesses(), gte(documentAccesses.accessedAt, monthStart)))
     .groupBy(documentAccesses.name, documentAccesses.docType)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit)
@@ -157,25 +194,23 @@ export async function getTopDocuments(limit = 5) {
   }))
 }
 
-export async function getSecurityEvents(days = 7) {
+export async function getAiSlaEvents(days = 7) {
   const since = daysAgo(days)
 
   const rows = await db
     .select({
       date: sql<string>`DATE(${auditLogs.createdAt})`.as('date'),
-      denied: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'denied')`.as('denied'),
-      blocked: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'blocked')`.as('blocked'),
-      errors: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'error')`.as('errors'),
+      successes: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'success' AND ${auditLogs.action} IN ('chat_query', 'file_upload'))`.as('successes'),
+      failures: sql<number>`COUNT(*) FILTER (WHERE ${auditLogs.result} = 'error' AND ${auditLogs.action} IN ('chat_query', 'file_upload'))`.as('failures'),
     })
     .from(auditLogs)
-    .where(gte(auditLogs.createdAt, since))
+    .where(and(excludeTestUserFromAudit(), gte(auditLogs.createdAt, since)))
     .groupBy(sql`DATE(${auditLogs.createdAt})`)
     .orderBy(sql`DATE(${auditLogs.createdAt})`)
 
   return rows.map((r) => ({
     date: typeof r.date === 'string' ? r.date : String(r.date),
-    denied: Number(r.denied),
-    blocked: Number(r.blocked),
-    errors: Number(r.errors),
+    successes: Number(r.successes),
+    failures: Number(r.failures),
   }))
 }

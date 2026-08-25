@@ -1,18 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { loginWithLdap, LdapLoginCredentials } from '../services/authService'
-import {
-  createLocalTestUserProfile,
-  isLocalTestModeEnabled,
-  isLocalTestUser,
-  LOCAL_TEST_ACCESS_TOKEN,
-} from '../utils/localTestUser'
 
 export function useAuth() {
   const { state, dispatch } = useApp()
   const [authError, setAuthError] = useState<string | null>(null)
-  const localTestModeEnabled = isLocalTestModeEnabled()
-  const localTestSessionActive = isLocalTestUser(state.user)
 
   const isAuthenticated = Boolean(state.user)
   const isLoading = state.isLoading
@@ -41,18 +33,6 @@ export function useAuth() {
   }, [dispatch])
 
   /**
-   * Cria uma sessão local de teste sem depender do Active Directory
-   */
-  const loginLocalTestUser = useCallback(() => {
-    if (!localTestModeEnabled) return
-
-    setAuthError(null)
-    dispatch({ type: 'SET_LOADING', payload: true })
-    sessionStorage.removeItem('audit_buffer')
-    dispatch({ type: 'SET_USER', payload: createLocalTestUserProfile() })
-  }, [dispatch, localTestModeEnabled])
-
-  /**
    * Realiza logout
    */
   const logout = useCallback(() => {
@@ -65,11 +45,8 @@ export function useAuth() {
    * Obtém o token de sessão atual
    */
   const getAccessToken = useCallback(async (): Promise<string | null> => {
-    if (localTestSessionActive) {
-      return LOCAL_TEST_ACCESS_TOKEN
-    }
     return state.user?.accessToken || null
-  }, [state.user, localTestSessionActive])
+  }, [state.user])
 
   // Verificar se sessão expirou
   useEffect(() => {
@@ -90,7 +67,6 @@ export function useAuth() {
     isLoading,
     authError,
     login,
-    loginLocalTestUser,
     logout,
     getAccessToken,
     clearAuthError: () => setAuthError(null),

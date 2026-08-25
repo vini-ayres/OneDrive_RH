@@ -36,6 +36,8 @@ export default {
         'nav-item-enter': 'navItemEnter 0.3s cubic-bezier(0.32, 0.72, 0, 1) backwards',
         'pulse-dot': 'pulseDot 1.4s infinite ease-in-out',
         'typing': 'typing 1.5s infinite',
+        'processing-label': 'processingLabel 0.28s ease-out',
+        'processing-bar': 'processingBar 1.8s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -61,7 +63,15 @@ export default {
         typing: {
           '0%, 60%, 100%': { opacity: '0.3' },
           '30%': { opacity: '1' },
-        }
+        },
+        processingLabel: {
+          '0%': { opacity: '0', transform: 'translateY(3px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        processingBar: {
+          '0%, 100%': { filter: 'brightness(1)' },
+          '50%': { filter: 'brightness(1.25)' },
+        },
       }
     },
   },

@@ -8,7 +8,6 @@ interface ImportMetaEnv {
   readonly VITE_AUTH_API_URL?: string
   readonly VITE_SESSION_TIMEOUT_MINUTES?: string
   readonly VITE_APP_ENV?: string
-  readonly VITE_ENABLE_LOCAL_TEST_USER?: string
 }
 
 interface ImportMeta {

@@ -1,22 +1,26 @@
 import { useCallback, useState } from 'react'
 import { useApp } from '../contexts/AppContext'
-import { sendChatMessage, uploadFileToOneDrive, logAuditEventLocal } from '../services/apiService'
+import { sendChatMessage, uploadFileToOneDrive, recordAiQueryOutcome } from '../services/apiService'
 import { sanitizeChatQuery, sanitizeApiResponse, generateSessionId } from '../utils/security'
 import { checkQueryPermission } from '../utils/rbac'
 import { extractFolderPathFromPrompt, validateUploadFile } from '../utils/uploadHelpers'
 import { ChatMessage, ProcessingStep, DocumentSource } from '../types'
 import { NEW_CONVERSATION_TITLE } from '../utils/conversation'
 import { useQueryClient } from '@tanstack/react-query'
+import {
+  CHAT_PROCESSING_TIMELINE,
+  UPLOAD_PROCESSING_TIMELINE,
+  completeTimeline,
+  failTimeline,
+  serializeSteps,
+  stepsForElapsed,
+} from '../utils/processingTimeline'
 
 export function useChat() {
   const { state, dispatch, sessionId, newConversation } = useApp()
   const queryClient = useQueryClient()
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([])
-
-  const updateStep = useCallback((id: string, updates: Partial<ProcessingStep>) => {
-    setProcessingSteps(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s))
-  }, [])
 
   const sendMessage = useCallback(async (query: string, file?: File | null) => {
     const { user } = state
@@ -104,6 +108,8 @@ export function useChat() {
       }
     }
 
+    const requestId = generateSessionId()
+    const promptSentAt = new Date().toISOString()
     const messageId = generateSessionId()
     const userMessage: ChatMessage = {
       id: messageId,
@@ -126,22 +132,6 @@ export function useChat() {
       payload: { conversationId: conversation.id, message: userMessage }
     })
 
-    // Registrar tentativa de auditoria
-    logAuditEventLocal({
-      userId: user.id,
-      userName: user.displayName,
-      userEmail: user.email,
-      action: file ? 'file_upload' : 'chat_query',
-      query: safe || query,
-      documentPath: folderPath || undefined,
-      documentAccessed: file?.name,
-      result: blocked || permissionDenied ? 'blocked' : 'success',
-      ipAddress: 'browser',
-      userAgent: navigator.userAgent,
-      sessionId,
-      role: user.roles[0] || 'colaborador',
-    })
-
     // Se bloqueado ou sem permissão
     if (blocked || permissionDenied) {
       const errorMessage: ChatMessage = {
@@ -158,21 +148,10 @@ export function useChat() {
       return
     }
 
-    // === Iniciar indicadores de processamento ===
+    // === Indicadores de processamento (avançam com o tempo) ===
     setIsProcessing(true)
-    const steps: ProcessingStep[] = file
-      ? [
-          { id: 'auth', label: 'Verificando autenticação...', status: 'done', timestamp: new Date() },
-          { id: 'prepare', label: 'Preparando arquivo para envio...', status: 'running' },
-          { id: 'upload', label: 'Enviando para o OneDrive...', status: 'pending' },
-          { id: 'confirm', label: 'Confirmando upload...', status: 'pending' },
-        ]
-      : [
-          { id: 'auth', label: 'Verificando autenticação...', status: 'done', timestamp: new Date() },
-          { id: 'search', label: 'Consultando OneDrive/SharePoint...', status: 'running' },
-          { id: 'analyze', label: 'Analisando documentos...', status: 'pending' },
-          { id: 'generate', label: 'Gerando resposta...', status: 'pending' },
-        ]
+    const timeline = file ? UPLOAD_PROCESSING_TIMELINE : CHAT_PROCESSING_TIMELINE
+    const steps = stepsForElapsed(timeline, 0)
     setProcessingSteps(steps)
 
     // Mensagem de loading do assistente
@@ -190,11 +169,54 @@ export function useChat() {
       payload: { conversationId: conversation.id, message: loadingMessage }
     })
 
+    const reportOutcome = (
+      result: 'success' | 'error',
+      processingMs?: number,
+      errorMessage?: string,
+      outcomeRequestId?: string
+    ) => {
+      void recordAiQueryOutcome(user, {
+        requestId: outcomeRequestId || requestId,
+        conversationId: conversation.id,
+        sessionId,
+        action: file ? 'file_upload' : 'chat_query',
+        result,
+        query: safe || query,
+        processingMs,
+        errorMessage,
+        documentAccessed: file?.name,
+        documentPath: folderPath || undefined,
+      })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard-charts'] })
+      void queryClient.invalidateQueries({ queryKey: ['audit-logs'] })
+    }
+
+    let lastStepKey = serializeSteps(steps)
+    const publishSteps = (next: ProcessingStep[]) => {
+      const key = serializeSteps(next)
+      if (key === lastStepKey) return
+      lastStepKey = key
+      setProcessingSteps(next)
+      dispatch({
+        type: 'UPDATE_MESSAGE',
+        payload: {
+          conversationId: conversation.id,
+          messageId: loadingMsgId,
+          updates: { processingSteps: next },
+        },
+      })
+    }
+
+    const startedAt = Date.now()
+    const tickId = window.setInterval(() => {
+      publishSteps(stepsForElapsed(timeline, Date.now() - startedAt))
+    }, 200)
+
+    const stopTicker = () => window.clearInterval(tickId)
+
     try {
       if (file && folderPath) {
-        updateStep('prepare', { status: 'done', timestamp: new Date() })
-        updateStep('upload', { status: 'running' })
-
         const response = await uploadFileToOneDrive({
           query: safe,
           folderPath,
@@ -205,19 +227,20 @@ export function useChat() {
           userGroups: user.groups,
           userRoles: user.roles,
           conversationId: conversation.id,
+          requestId,
+          promptSentAt,
           accessToken: user.accessToken,
           metadata: {
             ipAddress: 'browser',
             userAgent: navigator.userAgent,
             sessionId,
-            timestamp: new Date().toISOString(),
+            timestamp: promptSentAt,
           },
         })
 
-        updateStep('upload', { status: 'done', timestamp: new Date() })
-        updateStep('confirm', { status: 'running' })
-        await new Promise(resolve => setTimeout(resolve, 200))
-        updateStep('confirm', { status: 'done', timestamp: new Date() })
+        stopTicker()
+        publishSteps(completeTimeline(timeline))
+        await new Promise(resolve => setTimeout(resolve, 320))
 
         if (!response.success || !response.data) {
           throw new Error(response.error || response.message || 'Erro no upload do arquivo')
@@ -256,13 +279,14 @@ export function useChat() {
             },
           },
         })
-      } else {
-        // Simular progresso das etapas
-        await new Promise(resolve => setTimeout(resolve, 800))
-        updateStep('search', { status: 'done', timestamp: new Date() })
-        updateStep('analyze', { status: 'running' })
 
-        // Chamar API n8n
+        reportOutcome(
+          'success',
+          uploaded.processingTimeMs,
+          undefined,
+          uploaded.requestId || response.requestId || requestId
+        )
+      } else {
         const response = await sendChatMessage({
           query: safe,
           userId: user.id,
@@ -271,19 +295,20 @@ export function useChat() {
           userGroups: user.groups,
           userRoles: user.roles,
           conversationId: conversation.id,
+          requestId,
+          promptSentAt,
           accessToken: user.accessToken,
           metadata: {
             ipAddress: 'browser',
             userAgent: navigator.userAgent,
             sessionId,
-            timestamp: new Date().toISOString(),
+            timestamp: promptSentAt,
           },
         })
 
-        updateStep('analyze', { status: 'done', timestamp: new Date() })
-        updateStep('generate', { status: 'running' })
-        await new Promise(resolve => setTimeout(resolve, 400))
-        updateStep('generate', { status: 'done', timestamp: new Date() })
+        stopTicker()
+        publishSteps(completeTimeline(timeline))
+        await new Promise(resolve => setTimeout(resolve, 320))
 
         if (response.success && response.data) {
           const { answer, sources, wasBlocked, blockedReason } = response.data
@@ -309,6 +334,13 @@ export function useChat() {
               updates: assistantMessage,
             }
           })
+
+          reportOutcome(
+            'success',
+            response.data.processingTimeMs,
+            undefined,
+            response.data.requestId || response.requestId || requestId
+          )
         } else {
           throw new Error(response.error || 'Erro na resposta da API')
         }
@@ -336,15 +368,8 @@ export function useChat() {
       void queryClient.invalidateQueries({ queryKey: ['recent-documents'] })
 
     } catch (error: unknown) {
-      if (file) {
-        updateStep('prepare', { status: 'error' })
-        updateStep('upload', { status: 'error' })
-        updateStep('confirm', { status: 'error' })
-      } else {
-        updateStep('search', { status: 'error' })
-        updateStep('analyze', { status: 'error' })
-        updateStep('generate', { status: 'error' })
-      }
+      stopTicker()
+      publishSteps(failTimeline(stepsForElapsed(timeline, Date.now() - startedAt)))
 
       const err = error as Error
       let errorContent = file
@@ -382,11 +407,15 @@ export function useChat() {
           }
         }
       })
+
+      const timed = error as Error & { requestId?: string; processingTimeMs?: number }
+      reportOutcome('error', timed.processingTimeMs, errorContent, timed.requestId || requestId)
     } finally {
+      stopTicker()
       setIsProcessing(false)
       setProcessingSteps([])
     }
-  }, [state, isProcessing, dispatch, sessionId, newConversation, updateStep, queryClient])
+  }, [state, isProcessing, dispatch, sessionId, newConversation, queryClient])
 
   return {
     sendMessage,

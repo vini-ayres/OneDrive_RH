@@ -67,6 +67,8 @@ export interface UploadPayload {
   userGroups: string[]
   userRoles: UserRole[]
   conversationId?: string
+  requestId?: string
+  promptSentAt?: string
   accessToken: string
   metadata: {
     ipAddress: string
@@ -88,6 +90,7 @@ export interface UploadApiResponse {
     size?: number
   }
   requestId?: string
+  processingTimeMs?: number
 }
 
 // Fonte de documento citada na resposta
@@ -131,6 +134,9 @@ export interface AuditLog {
   query: string
   documentAccessed?: string
   documentPath?: string
+  documentUrl?: string
+  documentUrls?: string[]
+  documentLinks?: Array<{ name: string; url: string }>
   result: 'success' | 'blocked' | 'error' | 'denied'
   ipAddress: string
   userAgent: string
@@ -155,8 +161,8 @@ export interface DashboardStats {
   queriesToday: number
   activeUsers: number
   documentsAccessed: number
-  blockedQueries: number
-  deniedAccess: number
+  failedQueries: number
+  slaPercent: number
   totalQueriesMonth: number
   avgResponseTime: number
 }
@@ -166,7 +172,7 @@ export interface ChartDataPoint {
   date: string
   queries: number
   users: number
-  blocked: number
+  failures: number
 }
 
 export interface UserQueryData {
@@ -181,11 +187,10 @@ export interface DocumentAccessData {
   type: string
 }
 
-export interface SecurityEvent {
+export interface AiSlaEvent {
   date: string
-  denied: number
-  blocked: number
-  errors: number
+  successes: number
+  failures: number
 }
 
 // Resposta da API n8n
@@ -207,6 +212,8 @@ export interface ChatPayload {
   userGroups: string[]
   userRoles: UserRole[]
   conversationId?: string
+  requestId?: string
+  promptSentAt?: string
   context?: ChatMessage[]
   accessToken: string
   metadata: {
@@ -256,11 +263,12 @@ export interface AppState {
 
 // Grupos do Active Directory mapeados para roles
 export const ROLE_GROUP_MAP: Record<string, UserRole> = {
-  // Substitua pelos nomes reais dos grupos no domínio AD
   'RH-Sistema-Diretoria': 'diretoria',
   'RH-Sistema-RH': 'rh',
   'RH-Sistema-Gestores': 'gestor',
   'RH-Sistema-Colaboradores': 'colaborador',
+  GRP_docrh_consulta: 'colaborador',
+  GRP_docrh_admin: 'admin',
 }
 
 // Permissões por papel

@@ -110,6 +110,11 @@ export const chatCompletedEventLooseSchema = z
       })
       .passthrough()
       .optional(),
+    processingMs: z.unknown().optional(),
+    processingTimeMs: z.unknown().optional(),
+    promptSentAt: z.unknown().optional(),
+    timestamp: z.unknown().optional(),
+    error: z.unknown().optional(),
     metadata: z.unknown().optional(),
     conversationTitle: z.unknown().optional(),
   })
@@ -200,6 +205,17 @@ function parseTimestamp(value: unknown): string | undefined {
   return date.toISOString()
 }
 
+function coerceNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.round(value)
+  }
+  const raw = stripN8nValue(value)
+  if (!raw) return undefined
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return Math.round(parsed)
+}
+
 function inferAuditAction(
   attachment: ChatCompletedEvent['userMessage']['attachment'],
   explicit?: unknown
@@ -211,12 +227,16 @@ function inferAuditAction(
   return attachment ? 'file_upload' : 'chat_query'
 }
 
-function inferAuditResult(explicit: unknown, wasBlocked?: boolean): ChatCompletedEvent['audit']['result'] {
-  if (wasBlocked) return 'blocked'
+function inferAuditResult(
+  explicit: unknown,
+  wasBlocked?: boolean,
+  status?: ChatCompletedEvent['assistantMessage']['status']
+): ChatCompletedEvent['audit']['result'] {
   const result = stripN8nValue(explicit)
-  if (result === 'success' || result === 'blocked' || result === 'error' || result === 'denied') {
-    return result
-  }
+  if (result === 'error' || status === 'error') return 'error'
+  if (wasBlocked || result === 'blocked') return 'blocked'
+  if (result === 'denied') return 'denied'
+  if (result === 'success') return 'success'
   return 'success'
 }
 
@@ -249,16 +269,34 @@ export function normalizeChatCompletedEvent(raw: ChatCompletedEventLoose): ChatC
     stripN8nValue(raw.query) ??
     ''
 
-  const assistantContent =
+  const wasBlocked = raw.assistantMessage?.wasBlocked === true
+  const statusRaw = stripN8nValue(raw.assistantMessage?.status)
+  const auditResultRaw = stripN8nValue(raw.audit?.result)
+  const errorText = stripN8nValue(raw.error)
+  const status: ChatCompletedEvent['assistantMessage']['status'] =
+    wasBlocked || statusRaw === 'blocked'
+      ? 'blocked'
+      : statusRaw === 'error' || auditResultRaw === 'error' || Boolean(errorText)
+        ? 'error'
+        : statusRaw === 'sending'
+          ? 'sending'
+          : 'sent'
+
+  let assistantContent =
     stripN8nValue(raw.assistantMessage?.content) ??
     stripN8nValue(raw.answer) ??
+    errorText ??
     ''
 
   if (!userMessageContent) {
     throw new Error('userMessage.content (ou query) é obrigatório')
   }
   if (!assistantContent) {
-    throw new Error('assistantMessage.content (ou answer) é obrigatório')
+    if (status === 'error') {
+      assistantContent = 'Falha na consulta da IA.'
+    } else {
+      throw new Error('assistantMessage.content (ou answer) é obrigatório')
+    }
   }
 
   const attachment = normalizeAttachment(raw.userMessage?.attachment)
@@ -278,21 +316,20 @@ export function normalizeChatCompletedEvent(raw: ChatCompletedEventLoose): ChatC
   const markdownSources = extractSourcesFromMarkdown(assistantContent)
   const sources = explicitSources.length > 0 ? explicitSources : markdownSources
 
-  const wasBlocked = raw.assistantMessage?.wasBlocked === true
-  const statusRaw = stripN8nValue(raw.assistantMessage?.status)
-  const status =
-    wasBlocked || statusRaw === 'blocked'
-      ? 'blocked'
-      : statusRaw === 'error'
-        ? 'error'
-        : statusRaw === 'sending'
-          ? 'sending'
-          : 'sent'
-
   const documentAccessed =
     stripN8nValue(raw.audit?.documentAccessed) ??
     attachment?.name ??
     sources[0]?.name
+
+  const documentPath =
+    stripN8nValue(raw.audit?.documentPath) ??
+    sources[0]?.path ??
+    attachment?.folderPath
+
+  const metadataTimestamp =
+    typeof raw.metadata === 'object' && raw.metadata !== null && !Array.isArray(raw.metadata)
+      ? (raw.metadata as Record<string, unknown>).timestamp ?? (raw.metadata as Record<string, unknown>).promptSentAt
+      : undefined
 
   const normalized: ChatCompletedEvent = {
     requestId,
@@ -312,7 +349,11 @@ export function normalizeChatCompletedEvent(raw: ChatCompletedEventLoose): ChatC
     },
     userMessage: {
       content: userMessageContent,
-      timestamp: parseTimestamp(raw.userMessage?.timestamp),
+      timestamp:
+        parseTimestamp(raw.userMessage?.timestamp) ??
+        parseTimestamp(raw.promptSentAt) ??
+        parseTimestamp(raw.timestamp) ??
+        parseTimestamp(metadataTimestamp),
       attachment,
     },
     assistantMessage: {
@@ -320,19 +361,19 @@ export function normalizeChatCompletedEvent(raw: ChatCompletedEventLoose): ChatC
       status,
       sources,
       processingMs:
-        typeof raw.assistantMessage?.processingMs === 'number'
-          ? raw.assistantMessage.processingMs
-          : undefined,
-      blockedReason: stripN8nValue(raw.assistantMessage?.blockedReason),
+        coerceNumber(raw.assistantMessage?.processingMs) ??
+        coerceNumber(raw.processingMs) ??
+        coerceNumber(raw.processingTimeMs),
+      blockedReason: stripN8nValue(raw.assistantMessage?.blockedReason) ?? errorText,
       wasBlocked,
     },
     audit: {
       action: inferAuditAction(attachment, raw.audit?.action),
-      result: inferAuditResult(raw.audit?.result, wasBlocked),
+      result: inferAuditResult(raw.audit?.result, wasBlocked, status),
       ipAddress: stripN8nValue(raw.audit?.ipAddress),
       userAgent: stripN8nValue(raw.audit?.userAgent),
       documentAccessed,
-      documentPath: stripN8nValue(raw.audit?.documentPath),
+      documentPath,
     },
     conversationTitle: stripN8nValue(raw.conversationTitle),
   }

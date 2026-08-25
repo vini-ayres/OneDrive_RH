@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react'
 import {
   Shield, Search, Filter, FilterX, Download, RefreshCw,
-  CheckCircle, XCircle, AlertTriangle,
-  FileText, Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2
+  CheckCircle, AlertTriangle,
+  FileText, Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2, ExternalLink
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -10,26 +10,51 @@ import { AuditLog } from '../types'
 import { Badge } from '../components/ui/Badge'
 import { getRoleLabel } from '../utils/rbac'
 import { useAuditLogs } from '../hooks/useDataApi'
+import { isSecureUrl, documentLinkLabel } from '../utils/security'
 
-const RESULT_ICONS = {
+const RESULT_ICONS: Record<string, React.ReactNode> = {
   success: <CheckCircle size={14} className="text-green-500" />,
-  blocked: <Shield size={14} className="text-yellow-500" />,
-  denied: <XCircle size={14} className="text-red-500" />,
   error: <AlertTriangle size={14} className="text-orange-500" />,
+  blocked: <AlertTriangle size={14} className="text-orange-500" />,
+  denied: <AlertTriangle size={14} className="text-orange-500" />,
 }
 
-const RESULT_LABELS = {
+const RESULT_LABELS: Record<string, string> = {
   success: 'Sucesso',
-  blocked: 'Bloqueado',
-  denied: 'Negado',
-  error: 'Erro',
+  error: 'Falha da IA',
+  blocked: 'Falha da IA',
+  denied: 'Falha da IA',
 }
 
 const RESULT_VARIANTS: Record<string, 'green' | 'yellow' | 'red' | 'default'> = {
   success: 'green',
-  blocked: 'yellow',
+  error: 'red',
+  blocked: 'red',
   denied: 'red',
-  error: 'default',
+}
+
+function auditDocumentLinks(log: AuditLog): Array<{ name: string; url: string }> {
+  if (log.documentLinks?.length) {
+    return log.documentLinks
+      .filter((link) => isSecureUrl(link.url))
+      .map((link) => ({
+        url: link.url,
+        name: documentLinkLabel(link.name || log.documentAccessed, link.url),
+      }))
+  }
+
+  const urls = log.documentUrls?.length
+    ? log.documentUrls
+    : log.documentUrl
+      ? [log.documentUrl]
+      : []
+
+  return urls
+    .filter((url) => isSecureUrl(url))
+    .map((url, index) => ({
+      url,
+      name: documentLinkLabel(index === 0 ? log.documentAccessed : undefined, url),
+    }))
 }
 
 export function AuditPage() {
@@ -54,6 +79,7 @@ export function AuditPage() {
   const { data, isLoading, refetch, isFetching } = useAuditLogs(apiFilters, currentPage, PAGE_SIZE)
   const logs = data?.logs ?? []
   const totalFromApi = data?.total ?? 0
+  const apiCounts = data?.counts
 
   // Filtrar e ordenar logs
   const filteredLogs = useMemo(() => {
@@ -106,7 +132,7 @@ export function AuditPage() {
   }
 
   const exportCSV = () => {
-    const headers = ['Data', 'Usuário', 'Email', 'Perfil', 'Consulta', 'Documento', 'Resultado', 'IP']
+    const headers = ['Data', 'Usuário', 'Email', 'Perfil', 'Consulta', 'Documento', 'Link', 'Resultado', 'IP']
     const rows = filteredLogs.map(log => [
       format(log.timestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR }),
       log.userName,
@@ -114,6 +140,7 @@ export function AuditPage() {
       getRoleLabel(log.role),
       `"${log.query.replace(/"/g, '""')}"`,
       log.documentAccessed || '',
+      log.documentUrl || log.documentUrls?.[0] || '',
       RESULT_LABELS[log.result],
       log.ipAddress,
     ])
@@ -137,11 +164,14 @@ export function AuditPage() {
 
   // Stats rápidas
   const stats = {
-    total: totalFromApi,
-    success: filteredLogs.filter(l => l.result === 'success').length,
-    blocked: filteredLogs.filter(l => l.result === 'blocked').length,
-    denied: filteredLogs.filter(l => l.result === 'denied').length,
+    total: apiCounts?.total ?? totalFromApi,
+    success: apiCounts?.success ?? filteredLogs.filter(l => l.result === 'success').length,
+    error: apiCounts?.error ?? filteredLogs.filter(l => l.result === 'error').length,
   }
+  const slaPercent =
+    (stats.success + stats.error) === 0
+      ? 100
+      : Math.round((stats.success / (stats.success + stats.error)) * 1000) / 10
 
   if (isLoading) {
     return (
@@ -205,21 +235,21 @@ export function AuditPage() {
             </div>
           </div>
           <div className="card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg flex items-center justify-center">
-              <Shield size={15} className="text-yellow-600" />
+            <div className="w-8 h-8 bg-orange-50 dark:bg-orange-900/20 rounded-lg flex items-center justify-center">
+              <AlertTriangle size={15} className="text-orange-600" />
             </div>
             <div>
-              <p className="text-lg font-bold text-[var(--text-primary)]">{stats.blocked}</p>
-              <p className="text-xs text-[var(--text-muted)]">Bloqueados</p>
+              <p className="text-lg font-bold text-[var(--text-primary)]">{stats.error}</p>
+              <p className="text-xs text-[var(--text-muted)]">Falhas da IA</p>
             </div>
           </div>
           <div className="card p-3 flex items-center gap-3">
-            <div className="w-8 h-8 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center justify-center">
-              <XCircle size={15} className="text-red-600" />
+            <div className="w-8 h-8 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg flex items-center justify-center">
+              <CheckCircle size={15} className="text-emerald-600" />
             </div>
             <div>
-              <p className="text-lg font-bold text-[var(--text-primary)]">{stats.denied}</p>
-              <p className="text-xs text-[var(--text-muted)]">Negados</p>
+              <p className="text-lg font-bold text-[var(--text-primary)]">{slaPercent}%</p>
+              <p className="text-xs text-[var(--text-muted)]">SLA da IA</p>
             </div>
           </div>
         </div>
@@ -248,9 +278,7 @@ export function AuditPage() {
             >
               <option value="all">Todos os resultados</option>
               <option value="success">✅ Sucesso</option>
-              <option value="blocked">⚠️ Bloqueado</option>
-              <option value="denied">❌ Negado</option>
-              <option value="error">🔴 Erro</option>
+              <option value="error">⚠️ Falha de Consulta da IA</option>
             </select>
             <div className="flex items-center gap-1.5 min-w-0 sm:col-span-2 xl:col-span-1">
               <input
@@ -333,18 +361,57 @@ export function AuditPage() {
                           <p className="text-[10px] text-[var(--text-muted)]">{getRoleLabel(log.role)}</p>
                         </div>
                       </td>
-                      <td className="px-4 py-3 max-w-[200px]">
-                        <p className="text-xs text-[var(--text-secondary)] truncate">{log.query}</p>
+                      <td className="px-4 py-3 w-[38%] min-w-[260px] max-w-[480px]">
+                        <p className="text-xs text-[var(--text-secondary)] line-clamp-2 break-words leading-relaxed" title={log.query}>
+                          {log.query}
+                        </p>
                       </td>
-                      <td className="px-4 py-3 max-w-[150px]">
-                        {log.documentAccessed ? (
-                          <div className="flex items-center gap-1.5">
-                            <FileText size={11} className="text-blue-500 flex-shrink-0" />
-                            <span className="text-xs text-[var(--text-secondary)] truncate">{log.documentAccessed}</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-[var(--text-muted)]">—</span>
-                        )}
+                      <td className="px-4 py-3 max-w-[220px]">
+                        {(() => {
+                          const links = auditDocumentLinks(log)
+                          const primary = links[0]
+                          const label = primary
+                            ? primary.name
+                            : log.documentAccessed && !/^https?:\/\//i.test(log.documentAccessed)
+                              ? log.documentAccessed
+                              : ''
+
+                          if (!label && !primary) {
+                            return <span className="text-xs text-[var(--text-muted)]">—</span>
+                          }
+
+                          return (
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <FileText size={11} className="text-blue-500 flex-shrink-0" />
+                              {primary ? (
+                                <>
+                                  <a
+                                    href={primary.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
+                                    title={primary.name}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    {primary.name}
+                                  </a>
+                                  <a
+                                    href={primary.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 hover:text-blue-700 flex-shrink-0"
+                                    title="Abrir documento"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <ExternalLink size={12} />
+                                  </a>
+                                </>
+                              ) : (
+                                <span className="text-xs text-[var(--text-secondary)] truncate">{label}</span>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={RESULT_VARIANTS[log.result]}>
@@ -378,10 +445,34 @@ export function AuditPage() {
                               <p className="font-medium text-[var(--text-muted)] mb-0.5">Session ID</p>
                               <p className="text-[var(--text-secondary)] font-mono break-all">{log.sessionId}</p>
                             </div>
+                            <div className="min-w-0 sm:col-span-2 xl:col-span-4">
+                              <p className="font-medium text-[var(--text-muted)] mb-0.5">Consulta</p>
+                              <p className="text-[var(--text-secondary)] break-words whitespace-pre-wrap">{log.query}</p>
+                            </div>
                             {log.documentPath && (
                               <div className="min-w-0 sm:col-span-2 xl:col-span-4">
                                 <p className="font-medium text-[var(--text-muted)] mb-0.5">Caminho</p>
                                 <p className="text-[var(--text-secondary)] break-all">{log.documentPath}</p>
+                              </div>
+                            )}
+                            {auditDocumentLinks(log).length > 0 && (
+                              <div className="min-w-0 sm:col-span-2 xl:col-span-4">
+                                <p className="font-medium text-[var(--text-muted)] mb-0.5">Documento</p>
+                                <div className="space-y-1">
+                                  {auditDocumentLinks(log).map((link) => (
+                                      <a
+                                        key={link.url}
+                                        href={link.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:underline"
+                                        title="Abrir documento"
+                                      >
+                                        <ExternalLink size={12} className="flex-shrink-0" />
+                                        {link.name}
+                                      </a>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>

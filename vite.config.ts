@@ -15,9 +15,15 @@ export default defineConfig(({ mode }) => {
   const parsedUploadWebhook = new URL(uploadWebhook)
   const uploadWebhookPath = parsedUploadWebhook.pathname.replace(/\/+$/, '') || '/'
 
-  const authApiUrl = env.VITE_AUTH_API_URL || 'http://localhost:8080/api/auth'
-  const parsedAuth = new URL(authApiUrl)
-  const authPathPrefix = parsedAuth.pathname.replace(/\/+$/, '') || '/api/auth'
+  const authApiUrl = env.VITE_AUTH_API_URL || 'http://localhost:8787/api/auth'
+  const authApiIsRelative = authApiUrl.startsWith('/')
+  const parsedAuth = authApiIsRelative ? null : new URL(authApiUrl)
+  const authTarget = authApiIsRelative
+    ? (env.VITE_AUTH_API_TARGET || env.VITE_DATA_API_TARGET || 'http://127.0.0.1:8787')
+    : parsedAuth!.origin
+  const authPathPrefix = authApiIsRelative
+    ? '/api/auth'
+    : (parsedAuth!.pathname.replace(/\/+$/, '') || '/api/auth')
 
   const dataApiUrl = env.VITE_DATA_API_URL || 'http://localhost:8787/api'
   const dataApiIsRelative = dataApiUrl.startsWith('/')
@@ -69,7 +75,7 @@ export default defineConfig(({ mode }) => {
           rewrite: () => uploadWebhookPath,
         },
         '/api/auth': {
-          target: parsedAuth.origin,
+          target: authTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/api\/auth/, authPathPrefix),

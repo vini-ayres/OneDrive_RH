@@ -39,6 +39,7 @@ audit.get('/audit', async (c) => {
         timestamp: log.timestamp.toISOString(),
       })),
       total: result.total,
+      counts: result.counts,
       page,
       pageSize,
     })

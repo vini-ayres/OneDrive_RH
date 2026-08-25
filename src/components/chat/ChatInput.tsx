@@ -33,7 +33,7 @@ export function ChatInput({ pendingFile = null, onPendingFileHandled }: ChatInpu
   const [sendingUpload, setSendingUpload] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { sendMessage, isProcessing } = useChat()
+  const { sendMessage, isProcessing, processingSteps } = useChat()
   const { state } = useApp()
   const { user } = state
 
@@ -283,9 +283,10 @@ export function ChatInput({ pendingFile = null, onPendingFileHandled }: ChatInpu
           <div className="mt-2 px-1 flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
             <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
             <span>
-              {sendingUpload
-                ? 'Enviando arquivo para o OneDrive...'
-                : 'Consultando OneDrive e SharePoint...'}
+              {processingSteps.find(step => step.status === 'running')?.label
+                || (sendingUpload
+                  ? 'Enviando arquivo para o OneDrive...'
+                  : 'Consultando OneDrive e SharePoint...')}
             </span>
           </div>
         )}

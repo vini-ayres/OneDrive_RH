@@ -8,6 +8,7 @@ import { Avatar } from '../components/ui/Avatar'
 import { RoleBadge } from '../components/ui/Badge'
 import { getHighestRole, getRoleLabel, hasPermission } from '../utils/rbac'
 import { SESSION_TIMEOUT_MINUTES } from '../contexts/AppContext'
+import { MfaSettingsCard } from '../components/settings/MfaSettingsCard'
 
 export function SettingsPage() {
   const { state, dispatch } = useApp()
@@ -115,6 +116,8 @@ export function SettingsPage() {
           </div>
         </div>
 
+        <MfaSettingsCard accessToken={user.accessToken} />
+
         <div className="card">
           <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2 mb-4">
             <Shield size={15} />
@@ -127,7 +130,7 @@ export function SettingsPage() {
                 <div>
                   <p className="font-medium text-[var(--text-primary)]">Token de sessão</p>
                   <p className="text-xs text-[var(--text-muted)]">
-                    Emitido pelo backend após o login no Active Directory
+                    Emitido pelo backend após o login no Active Directory e o MFA
                   </p>
                 </div>
               </div>

@@ -14,6 +14,6 @@ export function apiError(error: string, status = 400) {
       error,
       timestamp: new Date().toISOString(),
     },
-    status: status as 400 | 401 | 403 | 404 | 409 | 500,
+    status: status as 400 | 401 | 403 | 404 | 409 | 423 | 429 | 500,
   }
 }

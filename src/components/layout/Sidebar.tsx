@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import {
   MessageSquarePlus, Star, FileText,
   BarChart2, Settings, Shield, ChevronRight,
-  Trash2, Search, Loader2
+  Trash2, Search, Loader2, Users
 } from 'lucide-react'
 import { useApp } from '../../contexts/AppContext'
 import { hasPermission } from '../../utils/rbac'
@@ -72,6 +72,7 @@ export function Sidebar() {
 
   const canViewAudit = hasPermission(user, 'canViewAuditLog')
   const canViewDashboard = hasPermission(user, 'canViewDashboard')
+  const canManageUsers = hasPermission(user, 'canManageUsers')
 
   const navItems: NavItem[] = [
     {
@@ -106,6 +107,15 @@ export function Sidebar() {
       label: 'Auditoria',
       icon: <Shield size={16} />,
       view: 'audit',
+    })
+  }
+
+  if (canManageUsers) {
+    navItems.push({
+      id: 'users',
+      label: 'Usuários',
+      icon: <Users size={16} />,
+      view: 'users',
     })
   }
 

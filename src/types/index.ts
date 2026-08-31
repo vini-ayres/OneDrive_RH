@@ -254,7 +254,7 @@ export interface AppState {
   conversations: Conversation[]
   theme: 'light' | 'dark'
   sidebarOpen: boolean
-  activeView: 'chat' | 'audit' | 'dashboard' | 'settings' | 'documents'
+  activeView: 'chat' | 'audit' | 'dashboard' | 'settings' | 'documents' | 'users'
   sessionExpiresAt: Date | null
   conversationLoadingId: string | null
   conversationLoadError: string | null
@@ -331,7 +331,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission> = {
     canViewAuditLog: true,
     canViewDashboard: true,
     canExportData: true,
-    canManageUsers: true,
+    canManageUsers: false,
   },
   admin: {
     canViewOwnDocuments: true,

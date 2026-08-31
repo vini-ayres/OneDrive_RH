@@ -20,8 +20,23 @@ export const users = pgTable('users', {
   department: text('department'),
   roles: text('roles').array().notNull().default([]),
   groups: text('groups').array().default([]),
+  tokenVersion: integer('token_version').notNull().default(0),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const userMfa = pgTable('user_mfa', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  totpSecretEncrypted: text('totp_secret_encrypted').notNull(),
+  pendingTotpSecretEncrypted: text('pending_totp_secret_encrypted'),
+  confirmed: boolean('confirmed').notNull().default(false),
+  backupCodeHashes: text('backup_code_hashes').array().notNull().default([]),
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  enrolledAt: timestamp('enrolled_at', { withTimezone: true }),
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
 })
 
 export const sessions = pgTable(
@@ -157,10 +172,15 @@ export const documentAccesses = pgTable(
   ]
 )
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   conversations: many(conversations),
   auditLogs: many(auditLogs),
   documentAccesses: many(documentAccesses),
+  mfa: one(userMfa, { fields: [users.id], references: [userMfa.userId] }),
+}))
+
+export const userMfaRelations = relations(userMfa, ({ one }) => ({
+  user: one(users, { fields: [userMfa.userId], references: [users.id] }),
 }))
 
 export const conversationsRelations = relations(conversations, ({ many, one }) => ({
@@ -175,6 +195,7 @@ export const messagesRelations = relations(messages, ({ many, one }) => ({
 }))
 
 export type User = typeof users.$inferSelect
+export type UserMfa = typeof userMfa.$inferSelect
 export type Conversation = typeof conversations.$inferSelect
 export type Message = typeof messages.$inferSelect
 export type AuditLog = typeof auditLogs.$inferSelect

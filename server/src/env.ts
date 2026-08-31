@@ -37,13 +37,18 @@ export function domainFromBaseDn(baseDn: string): string {
 }
 
 const ldapBaseDn = process.env.LDAP_BASE_DN || ''
+const authSessionSecret = required('AUTH_SESSION_SECRET', 'change-me-in-production')
 
 export const env = {
   port: Number(process.env.PORT || 8787),
   databaseUrl: buildDatabaseUrl(),
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  authSessionSecret: required('AUTH_SESSION_SECRET', 'change-me-in-production'),
+  authSessionSecret,
   authSessionMinutes: Number(process.env.AUTH_SESSION_MINUTES || 30),
+  authMfaEncryptionKey: process.env.AUTH_MFA_ENCRYPTION_KEY || authSessionSecret,
+  authMfaPepper: process.env.AUTH_MFA_PEPPER || authSessionSecret,
+  authMfaIssuer: process.env.AUTH_MFA_ISSUER || 'DocRH',
+  authMfaPendingMinutes: Number(process.env.AUTH_MFA_PENDING_MINUTES || 5),
   ldap: {
     url: process.env.LDAP_URL || '',
     baseDn: ldapBaseDn,

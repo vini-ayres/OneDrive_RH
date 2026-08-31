@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "retention:run": "tsx src/jobs/retention.ts"
+    "retention:run": "tsx src/jobs/retention.ts",
+    "mfa:reset": "tsx scripts/reset-mfa.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",

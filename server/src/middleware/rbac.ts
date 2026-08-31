@@ -48,14 +48,15 @@ export interface Permission {
   canViewAuditLog: boolean
   canViewDashboard: boolean
   canExportData: boolean
+  canManageUsers: boolean
 }
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission> = {
-  colaborador: { canViewAuditLog: false, canViewDashboard: false, canExportData: false },
-  gestor: { canViewAuditLog: false, canViewDashboard: true, canExportData: false },
-  rh: { canViewAuditLog: true, canViewDashboard: true, canExportData: true },
-  diretoria: { canViewAuditLog: true, canViewDashboard: true, canExportData: true },
-  admin: { canViewAuditLog: true, canViewDashboard: true, canExportData: true },
+  colaborador: { canViewAuditLog: false, canViewDashboard: false, canExportData: false, canManageUsers: false },
+  gestor: { canViewAuditLog: false, canViewDashboard: true, canExportData: false, canManageUsers: false },
+  rh: { canViewAuditLog: true, canViewDashboard: true, canExportData: true, canManageUsers: false },
+  diretoria: { canViewAuditLog: true, canViewDashboard: true, canExportData: true, canManageUsers: false },
+  admin: { canViewAuditLog: true, canViewDashboard: true, canExportData: true, canManageUsers: true },
 }
 
 export function getEffectivePermissions(roles: UserRole[]): Permission {
@@ -63,6 +64,7 @@ export function getEffectivePermissions(roles: UserRole[]): Permission {
     canViewAuditLog: false,
     canViewDashboard: false,
     canExportData: false,
+    canManageUsers: false,
   }
 
   for (const role of roles) {

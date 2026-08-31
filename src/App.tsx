@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { AuditPage } from './pages/AuditPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
+import { UsersPage } from './pages/UsersPage'
 import { Header } from './components/layout/Header'
 import { Sidebar } from './components/layout/Sidebar'
 import { SessionWarning } from './components/layout/SessionWarning'
@@ -65,6 +66,8 @@ function AppContent() {
         return <SettingsPage />
       case 'documents':
         return <DocumentsPage />
+      case 'users':
+        return <UsersPage />
       default:
         return <ChatPage />
     }

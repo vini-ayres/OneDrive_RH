@@ -41,7 +41,8 @@ function StatCard({ title, value, icon, color, subtitle }: StatCardProps) {
 
 function formatChartDate(dateStr: string): string {
   try {
-    return format(parseISO(dateStr.length === 10 ? dateStr : dateStr.slice(0, 10)), 'dd/MM', { locale: ptBR })
+    const isoDay = /^\d{4}-\d{2}-\d{2}/.test(dateStr) ? dateStr.slice(0, 10) : dateStr
+    return format(parseISO(isoDay), 'dd/MM', { locale: ptBR })
   } catch {
     return dateStr
   }
@@ -118,14 +119,14 @@ export function DashboardPage() {
       value: stats?.documentsAccessed ?? '—',
       icon: <FileText size={18} className="text-purple-600" />,
       color: 'bg-purple-50 dark:bg-purple-900/20',
-      subtitle: 'Únicos este mês',
+      subtitle: 'Únicos nos últimos 30 dias',
     },
     {
       title: 'Falhas de Consulta da IA',
       value: stats?.failedQueries ?? '—',
       icon: <AlertTriangle size={18} className="text-orange-600" />,
       color: 'bg-orange-50 dark:bg-orange-900/20',
-      subtitle: 'SLA da IA · este mês',
+      subtitle: 'SLA da IA · últimos 30 dias',
     },
     {
       title: 'SLA da IA',
@@ -139,7 +140,7 @@ export function DashboardPage() {
       value: stats && stats.avgResponseTime > 0 ? `${stats.avgResponseTime}s` : '—',
       icon: <Activity size={18} className="text-indigo-600" />,
       color: 'bg-indigo-50 dark:bg-indigo-900/20',
-      subtitle: 'Prompt → resposta do webhook',
+      subtitle: 'Últimos 30 dias · prompt → resposta',
     },
   ]
 

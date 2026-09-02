@@ -6,6 +6,7 @@ import {
 } from '../types'
 import { generateCsrfToken, generateSessionId } from '../utils/security'
 import { fileToBase64 } from '../utils/uploadHelpers'
+import { extractMarkdownSources } from '../utils/conversation'
 
 const N8N_BASE_URL = (import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678/webhook').trim()
 const N8N_CHAT_WEBHOOK_URL = (
@@ -92,18 +93,75 @@ function normalizeApiResponse<T>(payload: unknown): ApiResponse<T> {
   }
 }
 
+function asNonEmptyString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asNonEmptyString(value)
+    if (text) return text
+  }
+  return ''
+}
+
+function normalizeDocumentSource(raw: unknown): DocumentSource | null {
+  if (!isRecord(raw)) return null
+
+  const webUrl = firstNonEmptyString(raw.webUrl, raw.url, raw.link, raw.href)
+  const name = firstNonEmptyString(raw.name, raw.title, raw.filename, raw.fileName)
+  if (!webUrl && !name) return null
+
+  return {
+    id: firstNonEmptyString(raw.id) || webUrl || name,
+    name: name || webUrl,
+    path: asNonEmptyString(raw.path),
+    webUrl,
+    type: firstNonEmptyString(raw.type, raw.docType) || 'file',
+    modifiedAt: raw.modifiedAt ? new Date(String(raw.modifiedAt)) : new Date(),
+    excerpt: asNonEmptyString(raw.excerpt) || undefined,
+    relevanceScore: typeof raw.relevanceScore === 'number' ? raw.relevanceScore : undefined,
+  }
+}
+
+function collectPayloadSources(payload: Record<string, unknown>): DocumentSource[] {
+  const candidates = [payload.sources, payload.documents, payload.citations, payload.references, payload.fontes]
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate) || candidate.length === 0) continue
+    const normalized = candidate.map(normalizeDocumentSource).filter((s): s is DocumentSource => Boolean(s))
+    if (normalized.length > 0) return normalized
+  }
+  return []
+}
+
+function withFallbackSources(response: ChatApiResponse, payload?: Record<string, unknown>): ChatApiResponse {
+  if (response.sources.length > 0) return response
+
+  const fromPayload = payload ? collectPayloadSources(payload) : []
+  if (fromPayload.length > 0) {
+    return { ...response, sources: fromPayload }
+  }
+
+  const fromMarkdown = extractMarkdownSources(response.answer)
+  if (fromMarkdown.length > 0) {
+    return { ...response, sources: fromMarkdown }
+  }
+
+  return response
+}
+
 function coerceChatResponse(payload: unknown): ChatApiResponse | null {
   if (payload == null) return null
 
   if (typeof payload === 'string') {
-    return {
+    return withFallbackSources({
       answer: payload,
       sources: [],
       processingSteps: [],
       wasBlocked: false,
       requestId: generateSessionId(),
       processingTimeMs: 0,
-    }
+    })
   }
 
   if (!isRecord(payload)) {
@@ -115,17 +173,17 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
 
   if ('json' in payload && payload.json !== undefined) {
     const nestedJson = coerceChatResponse(payload.json)
-    if (nestedJson) return nestedJson
+    if (nestedJson) return withFallbackSources(nestedJson, payload)
   }
 
   if ('body' in payload && payload.body !== undefined) {
     const nestedBody = coerceChatResponse(payload.body)
-    if (nestedBody) return nestedBody
+    if (nestedBody) return withFallbackSources(nestedBody, payload)
   }
 
   if ('data' in payload && payload.data !== undefined) {
     const nested = coerceChatResponse(payload.data)
-    if (nested) return nested
+    if (nested) return withFallbackSources(nested, payload)
   }
 
   const answer =
@@ -155,18 +213,17 @@ function coerceChatResponse(payload: unknown): ChatApiResponse | null {
     return null
   }
 
-  const sources = Array.isArray(payload.sources) ? payload.sources as DocumentSource[] : []
   const processingSteps = Array.isArray(payload.processingSteps) ? payload.processingSteps as ProcessingStep[] : []
 
-  return {
+  return withFallbackSources({
     answer,
-    sources,
+    sources: collectPayloadSources(payload),
     processingSteps,
     blockedReason: typeof payload.blockedReason === 'string' ? payload.blockedReason : undefined,
     wasBlocked: Boolean(payload.wasBlocked),
     requestId: typeof payload.requestId === 'string' ? payload.requestId : generateSessionId(),
     processingTimeMs: typeof payload.processingTimeMs === 'number' ? payload.processingTimeMs : 0,
-  }
+  }, payload)
 }
 
 function buildN8nAuthHeaders(accessToken?: string): Record<string, string> {

@@ -4,7 +4,7 @@ import { TypingIndicator } from './TypingIndicator'
 import { Avatar } from '../ui/Avatar'
 import { useApp } from '../../contexts/AppContext'
 import { 
-  Copy, ThumbsUp, ThumbsDown, ExternalLink, 
+  Bot, Copy, ThumbsUp, ThumbsDown, ExternalLink, 
   FileText, Calendar, AlertTriangle, CheckCircle, X, Paperclip
 } from 'lucide-react'
 import { formatFileSize } from '../../utils/uploadHelpers'
@@ -95,10 +95,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div className="flex items-start gap-3 animate-fade-in">
       {/* Assistant avatar */}
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <svg viewBox="0 0 24 24" className="w-4 h-4 text-white fill-current">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
-        </svg>
+      <div
+        className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5"
+        title="Assistente"
+      >
+        <Bot size={16} className="text-white" strokeWidth={2} />
       </div>
 
       <div className="flex-1 min-w-0 max-w-[85%]">

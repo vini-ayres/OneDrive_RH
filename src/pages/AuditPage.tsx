@@ -91,6 +91,8 @@ export function AuditPage() {
       )
     }
 
+    result = result.filter(log => (log.ipAddress || '').trim().toLowerCase() !== 'browser')
+
     result.sort((a, b) => {
       const aVal = a[sortField]
       const bVal = b[sortField]
@@ -132,7 +134,7 @@ export function AuditPage() {
   }
 
   const exportCSV = () => {
-    const headers = ['Data', 'Usuário', 'Email', 'Perfil', 'Consulta', 'Documento', 'Link', 'Resultado', 'IP']
+    const headers = ['Data', 'Usuário', 'Email', 'Perfil', 'Consulta', 'Documento', 'Link', 'Resultado']
     const rows = filteredLogs.map(log => [
       format(log.timestamp, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR }),
       log.userName,
@@ -142,7 +144,6 @@ export function AuditPage() {
       log.documentAccessed || '',
       log.documentUrl || log.documentUrls?.[0] || '',
       RESULT_LABELS[log.result],
-      log.ipAddress,
     ])
 
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
@@ -192,7 +193,7 @@ export function AuditPage() {
               Log de Auditoria
             </h2>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              Registro completo de acessos e consultas em conformidade com LGPD
+              Somente consultas enviadas à IA (chat e upload)
             </p>
           </div>
           <div className="flex gap-2">
@@ -325,7 +326,6 @@ export function AuditPage() {
                     { key: 'query' as const, label: 'Consulta' },
                     { key: 'documentAccessed' as const, label: 'Documento' },
                     { key: 'result' as const, label: 'Resultado' },
-                    { key: 'ipAddress' as const, label: 'IP' },
                   ].map(col => (
                     <th
                       key={col.key}
@@ -421,15 +421,12 @@ export function AuditPage() {
                           </span>
                         </Badge>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-mono text-[var(--text-muted)]">{log.ipAddress}</span>
-                      </td>
                     </tr>
 
                     {/* Expanded row */}
                     {expandedRow === log.id && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-3 bg-[var(--bg-tertiary)]">
+                        <td colSpan={5} className="px-4 py-3 bg-[var(--bg-tertiary)]">
                           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-4 gap-y-3 text-xs">
                             <div className="min-w-0">
                               <p className="font-medium text-[var(--text-muted)] mb-0.5">Email</p>
@@ -484,7 +481,7 @@ export function AuditPage() {
 
                 {paginatedLogs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-[var(--text-muted)] text-sm">
+                    <td colSpan={5} className="px-4 py-12 text-center text-[var(--text-muted)] text-sm">
                       <Shield size={32} className="mx-auto mb-2 opacity-30" />
                       Nenhum registro encontrado com os filtros aplicados
                     </td>

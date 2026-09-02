@@ -74,7 +74,11 @@ export function useAuth() {
 
   const logout = useCallback(() => {
     dispatch({ type: 'LOGOUT' })
-    sessionStorage.clear()
+    try {
+      sessionStorage.removeItem('audit_buffer')
+    } catch {
+      // ignore
+    }
     setAuthError(null)
   }, [dispatch])
 

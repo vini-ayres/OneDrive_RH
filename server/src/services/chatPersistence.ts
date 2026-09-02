@@ -212,9 +212,11 @@ export async function persistChatCompletedEvent(event: ChatCompletedEvent): Prom
       throw new Error('Failed to upsert conversation')
     }
 
-    const userMessageTime = event.userMessage.timestamp
+    const userMessageTimeRaw = event.userMessage.timestamp
       ? new Date(event.userMessage.timestamp)
       : now
+    const userMessageTime = Number.isNaN(userMessageTimeRaw.getTime()) ? now : userMessageTimeRaw
+    const assistantMessageTime = new Date(Math.max(now.getTime(), userMessageTime.getTime() + 1))
 
     const [userMessage] = await tx
       .insert(messages)
@@ -281,7 +283,7 @@ export async function persistChatCompletedEvent(event: ChatCompletedEvent): Prom
         requestId: event.requestId,
         processingMs: event.assistantMessage.processingMs ?? null,
         blockedReason: event.assistantMessage.blockedReason ?? null,
-        createdAt: now,
+        createdAt: assistantMessageTime,
       })
       .returning()
 
@@ -563,6 +565,40 @@ export async function recordDocumentAccess(
   })
 }
 
+function messageTime(value: Date): number {
+  const time = value.getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function sortByTimestamp<T extends { role: string; timestamp: Date }>(messages: T[]): T[] {
+  return [...messages].sort((a, b) => {
+    const dt = messageTime(a.timestamp) - messageTime(b.timestamp)
+    if (dt !== 0) return dt
+    if (a.role === 'user' && b.role !== 'user') return -1
+    if (a.role !== 'user' && b.role === 'user') return 1
+    return 0
+  })
+}
+
+function isFullyInvertedTurns<T extends { role: string }>(messages: T[]): boolean {
+  if (messages.length < 2 || messages.length % 2 !== 0) return false
+  for (let i = 0; i < messages.length; i += 2) {
+    if (messages[i].role !== 'assistant' || messages[i + 1].role !== 'user') return false
+  }
+  return true
+}
+
+function stabilizeMessageOrder<T extends { role: string; timestamp: Date }>(messages: T[]): T[] {
+  const sorted = sortByTimestamp(messages)
+  if (!isFullyInvertedTurns(sorted)) return sorted
+
+  const repaired: T[] = []
+  for (let i = 0; i < sorted.length; i += 2) {
+    repaired.push(sorted[i + 1], sorted[i])
+  }
+  return repaired
+}
+
 export async function getConversationList(userId: string) {
   return db
     .select({
@@ -590,7 +626,11 @@ export async function getConversationMessages(conversationId: string, userId: st
     .select()
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
-    .orderBy(messages.createdAt)
+    .orderBy(
+      sql`${messages.createdAt} ASC`,
+      sql`CASE WHEN ${messages.role} = 'user' THEN 0 WHEN ${messages.role} = 'assistant' THEN 1 ELSE 2 END`,
+      messages.id
+    )
 
   const result = []
 
@@ -634,7 +674,7 @@ export async function getConversationMessages(conversationId: string, userId: st
 
   return {
     conversation,
-    messages: result,
+    messages: stabilizeMessageOrder(result),
   }
 }
 

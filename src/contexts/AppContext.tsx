@@ -8,6 +8,7 @@ import {
   loadPersistedSession,
   saveLastConversationId,
   savePersistedSession,
+  SESSION_KEY,
 } from '../utils/sessionPersistence'
 
 type AppAction =
@@ -27,6 +28,7 @@ type AppAction =
   | { type: 'SET_CONVERSATION_STATUS'; payload: { loadingId: string | null; error: string | null } }
   | { type: 'RELOAD_CONVERSATION' }
   | { type: 'UPDATE_ACTIVITY' }
+  | { type: 'HYDRATE_SESSION'; payload: { user: UserProfile; sessionExpiresAt: Date } }
   | { type: 'LOGOUT' }
 
 const SESSION_TIMEOUT_MINUTES = 30
@@ -254,6 +256,15 @@ function appReducer(state: AppState, action: AppAction): AppState {
       }
     }
 
+    case 'HYDRATE_SESSION':
+      return {
+        ...state,
+        user: action.payload.user,
+        isAuthenticated: true,
+        isLoading: false,
+        sessionExpiresAt: action.payload.sessionExpiresAt,
+      }
+
     case 'LOGOUT':
       clearPersistedSession()
       return {
@@ -286,6 +297,8 @@ const AppContext = createContext<AppContextValue | null>(null)
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const userRef = useRef(state.user)
+  userRef.current = state.user
 
   // Aplicar tema salvo na inicialização
   useEffect(() => {
@@ -295,6 +308,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.remove('dark')
     }
   }, [])
+
+  // Sincroniza login/logout entre abas via localStorage
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SESSION_KEY) return
+
+      if (!event.newValue) {
+        if (userRef.current) {
+          dispatch({ type: 'LOGOUT' })
+        }
+        return
+      }
+
+      if (userRef.current) return
+
+      const session = loadPersistedSession()
+      if (session) {
+        dispatch({
+          type: 'HYDRATE_SESSION',
+          payload: {
+            user: session.user,
+            sessionExpiresAt: session.sessionExpiresAt,
+          },
+        })
+      }
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [dispatch])
 
   // Monitor de inatividade - timeout de sessão
   const resetActivityTimer = useCallback(() => {

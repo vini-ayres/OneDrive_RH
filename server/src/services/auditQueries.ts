@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, count, ilike, or, inArray } from 'drizzle-orm'
+import { eq, and, gte, lte, desc, count, ilike, or, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { auditLogs, messages, messageSources, documentAccesses } from '../db/schema.js'
 import { excludeTestUserFromAudit } from './excludedUsers.js'
@@ -13,8 +13,18 @@ export interface AuditQueryFilters {
   offset?: number
 }
 
+/** Auditoria executiva: só consultas reais, nunca login/MFA ou linhas sem prompt. */
+function isConsultationLog() {
+  return sql`${auditLogs.action} IN ('chat_query', 'file_upload') AND nullif(btrim(${auditLogs.query}), '') IS NOT NULL`
+}
+
+/** Oculta o registro duplicado gravado pelo frontend com IP literal "browser". */
+function isNotBrowserIpLog() {
+  return sql`lower(btrim(coalesce(${auditLogs.ipAddress}, ''))) <> 'browser'`
+}
+
 function buildAuditConditions(filters: AuditQueryFilters, includeResult = true) {
-  const conditions = [excludeTestUserFromAudit()]
+  const conditions = [excludeTestUserFromAudit(), isConsultationLog(), isNotBrowserIpLog()]
 
   if (filters.userId) {
     conditions.push(eq(auditLogs.userId, filters.userId))
@@ -30,13 +40,12 @@ function buildAuditConditions(filters: AuditQueryFilters, includeResult = true) 
   }
   if (filters.documentName) {
     const term = `%${filters.documentName}%`
-    conditions.push(
-      or(
-        ilike(auditLogs.documentAccessed, term),
-        ilike(auditLogs.query, term),
-        ilike(auditLogs.userName, term)
-      )
+    const queryFilter = or(
+      ilike(auditLogs.documentAccessed, term),
+      ilike(auditLogs.query, term),
+      ilike(auditLogs.userName, term)
     )
+    if (queryFilter) conditions.push(queryFilter)
   }
 
   return conditions.length > 0 ? and(...conditions) : undefined

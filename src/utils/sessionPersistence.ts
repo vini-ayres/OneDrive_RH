@@ -1,6 +1,6 @@
 import { UserProfile } from '../types'
 
-const SESSION_KEY = 'rh_session'
+export const SESSION_KEY = 'rh_session'
 const LAST_CONVERSATION_KEY = 'rh_last_conversation_id'
 
 interface PersistedSession {
@@ -16,12 +16,46 @@ function reviveUser(user: UserProfile): UserProfile {
   }
 }
 
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key) ?? sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // storage cheio ou indisponível
+  }
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
+
+function removeStorage(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
+
 export function loadPersistedSession(): {
   user: UserProfile
   sessionExpiresAt: Date
 } | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
+    const raw = readStorage(SESSION_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as PersistedSession
     if (!parsed?.user?.id || !parsed.sessionExpiresAt) return null
@@ -45,33 +79,25 @@ export function savePersistedSession(user: UserProfile, sessionExpiresAt: Date) 
       user,
       sessionExpiresAt: sessionExpiresAt.toISOString(),
     }
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload))
+    writeStorage(SESSION_KEY, JSON.stringify(payload))
   } catch {
     // storage cheio ou indisponível
   }
 }
 
 export function clearPersistedSession() {
-  try {
-    sessionStorage.removeItem(SESSION_KEY)
-    sessionStorage.removeItem(LAST_CONVERSATION_KEY)
-  } catch {
-    // ignore
-  }
+  removeStorage(SESSION_KEY)
+  removeStorage(LAST_CONVERSATION_KEY)
 }
 
 export function loadLastConversationId(): string | null {
-  try {
-    return sessionStorage.getItem(LAST_CONVERSATION_KEY)
-  } catch {
-    return null
-  }
+  return readStorage(LAST_CONVERSATION_KEY)
 }
 
 export function saveLastConversationId(id: string | null) {
   try {
-    if (id) sessionStorage.setItem(LAST_CONVERSATION_KEY, id)
-    else sessionStorage.removeItem(LAST_CONVERSATION_KEY)
+    if (id) writeStorage(LAST_CONVERSATION_KEY, id)
+    else removeStorage(LAST_CONVERSATION_KEY)
   } catch {
     // ignore
   }

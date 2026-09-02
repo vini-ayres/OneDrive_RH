@@ -38,9 +38,9 @@ dashboard.get('/dashboard/charts', async (c) => {
 
   const [chartData, topUsers, topDocuments, aiSlaEvents] = await Promise.all([
     getDashboardChartData(period),
-    getTopUsers(),
-    getTopDocuments(),
-    getAiSlaEvents(period === '90d' ? 90 : period === '30d' ? 30 : 7),
+    getTopUsers(period),
+    getTopDocuments(period),
+    getAiSlaEvents(period),
   ])
 
   return c.json(

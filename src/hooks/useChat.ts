@@ -5,7 +5,7 @@ import { sanitizeChatQuery, sanitizeApiResponse, generateSessionId } from '../ut
 import { checkQueryPermission } from '../utils/rbac'
 import { extractFolderPathFromPrompt, validateUploadFile } from '../utils/uploadHelpers'
 import { ChatMessage, ProcessingStep, DocumentSource } from '../types'
-import { NEW_CONVERSATION_TITLE } from '../utils/conversation'
+import { extractMarkdownSources, NEW_CONVERSATION_TITLE } from '../utils/conversation'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   CHAT_PROCESSING_TIMELINE,
@@ -253,15 +253,10 @@ export function useChat() {
           throw new Error('O webhook de upload não retornou uma mensagem de resposta.')
         }
 
-        // Extrai links markdown da resposta do n8n para a seção de fontes
-        const linkMatches = [...answer.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)]
-        const sources = linkMatches.map(match => ({
-          id: '',
-          name: match[1],
-          path: uploaded.file?.path || folderPath,
-          modifiedAt: new Date(),
-          webUrl: match[2],
-          type: file.type || 'file',
+        const sources = extractMarkdownSources(answer).map(source => ({
+          ...source,
+          path: uploaded.file?.path || folderPath || source.path,
+          type: file.type || source.type,
         }))
 
         dispatch({
@@ -315,6 +310,9 @@ export function useChat() {
 
           // Sanitizar resposta da API (remover IDs técnicos)
           const sanitizedAnswer = sanitizeApiResponse(answer)
+          const resolvedSources = wasBlocked
+            ? []
+            : sanitizeSources(sources.length > 0 ? sources : extractMarkdownSources(sanitizedAnswer))
 
           const assistantMessage: ChatMessage = {
             id: generateSessionId(),
@@ -322,7 +320,7 @@ export function useChat() {
             content: wasBlocked ? (blockedReason || 'Acesso bloqueado.') : sanitizedAnswer,
             timestamp: new Date(),
             status: wasBlocked ? 'blocked' : 'sent',
-            sources: wasBlocked ? [] : sanitizeSources(sources),
+            sources: resolvedSources,
           }
 
           // Remover mensagem de loading e adicionar resposta real
@@ -431,6 +429,9 @@ function sanitizeSources(sources: DocumentSource[]): DocumentSource[] {
   return sources.map(source => ({
     ...source,
     id: source.id || source.webUrl || source.name || '',
-    path: source.path.replace(/\/drives\/[^/]+\/items\/[^/]+/g, ''),
+    path: (source.path || '').replace(/\/drives\/[^/]+\/items\/[^/]+/g, ''),
+    webUrl: source.webUrl || '',
+    name: source.name || source.webUrl || '',
+    modifiedAt: source.modifiedAt ? new Date(source.modifiedAt) : new Date(),
   }))
 }
